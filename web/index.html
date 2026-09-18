@@ -1,0 +1,715 @@
+<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>AMR</title>
+  <style>
+    :root {
+      --bg: #eef1fb;
+      --panel: #ffffff;
+      --ink: #172033;
+      --muted: #65708a;
+      --line: #d9def0;
+      --blue: #1769d1;
+      --blue-dark: #0f4e9c;
+      --green: #11834a;
+      --orange: #e87510;
+      --red: #bc2d32;
+      --shadow: 0 5px 20px rgba(31, 45, 85, .12);
+    }
+    * { box-sizing: border-box; }
+    html, body { height: 100%; margin: 0; }
+    body {
+      background: var(--bg);
+      color: var(--ink);
+      font: 15px/1.35 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+    button { font: inherit; }
+    button {
+      border: 1px solid var(--line);
+      border-radius: 9px;
+      background: #fff;
+      color: var(--ink);
+      cursor: pointer;
+      padding: .62rem .8rem;
+      touch-action: manipulation;
+    }
+    button:hover { border-color: var(--blue); }
+    button:disabled { cursor: not-allowed; opacity: .45; }
+    button.primary { background: var(--blue); border-color: var(--blue); color: #fff; }
+    button.primary:hover { background: var(--blue-dark); }
+    .topbar {
+      align-items: center;
+      background: var(--panel);
+      border-bottom: 1px solid var(--line);
+      display: flex;
+      gap: .75rem;
+      min-height: 62px;
+      padding: .65rem 1rem;
+    }
+    .brand { font-size: 1.25rem; font-weight: 750; }
+    .status-chip {
+      align-items: center;
+      border: 1px solid var(--line);
+      border-radius: 99px;
+      display: inline-flex;
+      gap: .4rem;
+      padding: .42rem .7rem;
+      white-space: nowrap;
+    }
+    .status-dot { background: #9aa3b7; border-radius: 50%; height: 9px; width: 9px; }
+    .status-chip.ok { background: #e8f7ee; border-color: #9bd1b1; color: var(--green); }
+    .status-chip.bad { background: #fff0f0; border-color: #e2a5a5; color: var(--red); }
+    .status-chip.ok .status-dot { background: var(--green); }
+    .status-chip.bad .status-dot { background: var(--red); }
+    .app {
+      margin: 1rem auto;
+      max-width: 1600px;
+      padding: 0 1rem;
+    }
+    .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; box-shadow: var(--shadow); }
+    .map-panel { padding: .8rem; }
+    .toolbar {
+      align-items: center;
+      display: flex;
+      flex-wrap: wrap;
+      gap: .5rem;
+      margin-bottom: .7rem;
+    }
+    .toolbar .spacer { flex: 1; }
+    .map-wrap {
+      align-items: center;
+      background: #858585;
+      border: 1px solid #767b8a;
+      border-radius: 8px;
+      display: flex;
+      justify-content: center;
+      min-height: 480px;
+      overflow: hidden;
+      position: relative;
+    }
+    .canvas-stack {
+      max-height: 72vh;
+      max-width: 100%;
+      position: relative;
+    }
+    .canvas-stack canvas {
+      height: 100%;
+      inset: 0;
+      position: absolute;
+      width: 100%;
+    }
+    .canvas-stack #mapCanvas {
+      height: auto;
+      position: relative;
+      width: auto;
+    }
+    .canvas-stack #scanCanvas,
+    .canvas-stack #pathCanvas {
+      pointer-events: none;
+    }
+    .canvas-stack #overlayCanvas {
+      cursor: crosshair;
+      pointer-events: auto;
+    }
+    .camera-overlay {
+      padding: .15rem;
+      pointer-events: none;
+      position: absolute;
+      right: .1rem;
+      top: .1rem;
+      width: clamp(170px, 20vw, 280px);
+      z-index: 2;
+    }
+    #mapCanvas {
+      background: #858585;
+      display: block;
+      image-rendering: pixelated;
+      max-height: 72vh;
+      max-width: 100%;
+      touch-action: none;
+    }
+    .map-hint { color: var(--muted); font-size: .9rem; margin: .6rem .1rem 0; min-height: 1.3em; }
+    .status-inline {
+      align-items: center;
+      color: var(--muted);
+      display: flex;
+      flex-wrap: wrap;
+      gap: .55rem .9rem;
+      margin-left: .35rem;
+    }
+    .status-inline > span { white-space: nowrap; }
+    .status-inline .value {
+      color: var(--ink);
+      margin-left: .2rem;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .sensor-summary {
+      cursor: help;
+      display: inline-flex;
+      position: relative;
+    }
+    .sensor-summary::after {
+      background: var(--ink);
+      border-radius: 7px;
+      bottom: calc(100% + .55rem);
+      color: #fff;
+      content: attr(data-tooltip);
+      left: 50%;
+      max-width: min(80vw, 420px);
+      opacity: 0;
+      padding: .45rem .65rem;
+      pointer-events: none;
+      position: absolute;
+      transform: translate(-50%, .35rem);
+      transition: opacity .15s ease, transform .15s ease;
+      white-space: nowrap;
+      z-index: 10;
+    }
+    .sensor-summary:hover::after,
+    .sensor-summary:focus-visible::after {
+      opacity: 1;
+      transform: translate(-50%, 0);
+    }
+    #camera {
+      background: #20232c;
+      border-radius: 8px;
+      display: block;
+      min-height: 0;
+      object-fit: contain;
+      width: 100%;
+    }
+    .legend { color: var(--muted); display: flex; flex-wrap: wrap; gap: .7rem; margin-top: .55rem; }
+    .legend i { border-radius: 50%; display: inline-block; height: 10px; margin-right: .25rem; width: 10px; }
+    .legend .robot { background: #1469db; }
+    .legend .scan { background: var(--orange); }
+    .legend .goal { background: #d11b38; }
+    @media (max-width: 900px) {
+      .map-wrap { min-height: 330px; }
+    }
+    @media (max-width: 580px) {
+      .status-chip { margin-left: auto; }
+      .map-wrap { min-height: 260px; }
+      .camera-overlay { right: .45rem; top: .45rem; width: 155px; }
+    }
+  </style>
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">AMR</div>
+  </header>
+
+  <main class="app">
+    <section class="panel map-panel">
+      <div class="toolbar">
+        <button id="setGoal">Set Goal</button>
+        <button id="goButton" class="primary" disabled>GO</button>
+        <button id="cancelButton" disabled>Cancel</button>
+        <span class="spacer"></span>
+        <div class="status-inline" aria-label="Robot status">
+          <span id="sensorSummary" class="sensor-summary"
+                tabindex="0"
+                data-tooltip="Map: waiting | Robot pose: waiting | LiDAR: waiting | Camera: waiting"
+                title="Map: waiting | Robot pose: waiting | LiDAR: waiting | Camera: waiting">
+            Sensors <strong id="sensorStatus" class="value">0/4</strong>
+          </span>
+        </div>
+        <span id="modeState" class="status-chip bad"><i class="status-dot" aria-hidden="true"></i><span>Disconnected</span></span>
+      </div>
+      <div class="map-wrap">
+        <div class="canvas-stack">
+          <canvas id="mapCanvas" width="640" height="480"></canvas>
+          <canvas id="scanCanvas" width="640" height="480" aria-hidden="true"></canvas>
+          <canvas id="pathCanvas" width="640" height="480" aria-hidden="true"></canvas>
+          <canvas id="overlayCanvas" width="640" height="480" aria-label="Map interaction layer"></canvas>
+        </div>
+        <section class="panel camera-overlay">
+          <img id="camera" alt="USB camera">
+        </section>
+      </div>
+      <p id="mapHint" class="map-hint" role="status" aria-live="polite">Bấm Set Goal để chọn điểm B.</p>
+      <div class="legend">
+        <span><i class="robot"></i>Robot</span>
+        <span><i class="scan"></i>LiDAR</span>
+        <span><i class="goal"></i>Goal</span>
+      </div>
+    </section>
+
+  </main>
+
+  <script>
+    /* Minimal rosbridge client. No CDN or Internet dependency is required. */
+    class RosBridge {
+      constructor(url, onConnection = () => {}) {
+        this.url = url;
+        this.onConnection = onConnection;
+        this.socket = null;
+        this.connected = false;
+        this.handlers = new Map();
+        this.sequence = 0;
+        this.connect();
+      }
+      connect() {
+        this.socket = new WebSocket(this.url);
+        this.socket.onopen = () => {
+          this.connected = true;
+          this.onConnection(true);
+          this.handlers.forEach((entry, topic) => this.send({
+            op: 'subscribe', id: 'sub_' + (++this.sequence), topic,
+            type: entry.type, throttle_rate: entry.throttle || 0,
+            queue_length: 1
+          }));
+        };
+        this.socket.onclose = () => {
+          this.connected = false;
+          this.onConnection(false);
+          setTimeout(() => this.connect(), 2000);
+        };
+        this.socket.onerror = () => {
+          this.connected = false;
+          this.onConnection(false);
+        };
+        this.socket.onmessage = event => {
+          let message;
+          try { message = JSON.parse(event.data); } catch (_) { return; }
+          if (message.op === 'publish' && this.handlers.has(message.topic)) {
+            this.handlers.get(message.topic).callback(message.msg || {});
+          }
+        };
+      }
+      send(message) {
+        if (this.connected && this.socket.readyState === WebSocket.OPEN) {
+          this.socket.send(JSON.stringify(message));
+          return true;
+        } else {
+          return false;
+        }
+      }
+      subscribe(topic, type, callback, throttle = 0) {
+        this.handlers.set(topic, {type, callback, throttle});
+        if (this.connected) this.send({
+          op: 'subscribe', id: 'sub_' + (++this.sequence), topic, type,
+          throttle_rate: throttle, queue_length: 1
+        });
+      }
+      publish(topic, type, msg) {
+        this.send({op: 'publish', id: 'pub_' + (++this.sequence), topic, type, msg});
+      }
+    }
+
+    const state = {
+      interaction: 'none', map: null, pose: null, scan: null,
+      scanSequence: 0,
+      path: null, goal: null,
+      sensorReady: new Set(), manualCommand: null,
+      keyboardActive: false, keyboardKeys: new Set(),
+      localized: false, navigationActive: false,
+      mapTransform: null,
+      dirty: {map: true, scan: true, path: true, overlay: true}
+    };
+    const mapCanvas = document.getElementById('mapCanvas');
+    const scanCanvas = document.getElementById('scanCanvas');
+    const pathCanvas = document.getElementById('pathCanvas');
+    const overlayCanvas = document.getElementById('overlayCanvas');
+    const canvas = overlayCanvas;
+    const mapContext = mapCanvas.getContext('2d');
+    const scanContext = scanCanvas.getContext('2d');
+    const pathContext = pathCanvas.getContext('2d');
+    const overlayContext = overlayCanvas.getContext('2d');
+    const rosUrl = (location.protocol === 'https:' ? 'wss://' : 'ws://') + location.hostname + ':9090';
+    const realtimeRos = new RosBridge(rosUrl, setConnection);
+    const bulkRos = new RosBridge(rosUrl);
+    const cameraUrl = (location.protocol === 'https:' ? 'https://' : 'http://')
+      + location.hostname + ':8081/camera.mjpg';
+    const cameraHealthUrl = (location.protocol === 'https:' ? 'https://' : 'http://')
+      + location.hostname + ':8081/healthz';
+
+    function $(id) { return document.getElementById(id); }
+    function setConnection(ok) {
+      const target = $('modeState');
+      target.classList.toggle('ok', ok);
+      target.classList.toggle('bad', !ok);
+      target.querySelector('span').textContent = ok ? 'Connected' : 'Disconnected';
+      if (!ok) {
+        stopKeyboard(false);
+        $('cancelButton').disabled = true;
+      } else {
+        // Never resume a command that was active before the disconnect.
+        state.manualCommand = zeroTwist();
+        realtimeRos.publish('/web/cmd_vel_manual', 'geometry_msgs/msg/Twist', zeroTwist());
+        $('cancelButton').disabled = !state.navigationActive;
+      }
+      updateGoButton();
+    }
+    function yawFromQuaternion(q) {
+      return Math.atan2(2 * (q.w * q.z + q.x * q.y), 1 - 2 * (q.y * q.y + q.z * q.z));
+    }
+    function quaternionFromYaw(yaw) {
+      return {x: 0, y: 0, z: Math.sin(yaw / 2), w: Math.cos(yaw / 2)};
+    }
+    const sensorLabels = {
+      map: 'Map', pose: 'Robot pose', scan: 'LiDAR', camera: 'Camera'
+    };
+    function markSensor(name) {
+      state.sensorReady.add(name);
+      const status = Object.entries(sensorLabels)
+        .map(([key, label]) => label + ': ' + (state.sensorReady.has(key) ? 'ready' : 'waiting'))
+        .join(' | ');
+      $('sensorStatus').textContent = state.sensorReady.size + '/4';
+      $('sensorSummary').dataset.tooltip = status;
+      $('sensorSummary').title = status;
+    }
+    async function checkCameraHealth() {
+      try {
+        const response = await fetch(cameraHealthUrl, {cache: 'no-store'});
+        if (response.ok && (await response.json()).ready) markSensor('camera');
+      } catch (_) {}
+    }
+
+    function updateMapTransform(map) {
+      const info = map.info;
+      const origin = info.origin || {};
+      const position = origin.position || {x: 0, y: 0};
+      const yaw = yawFromQuaternion(origin.orientation || {x:0,y:0,z:0,w:1});
+      state.mapTransform = {
+        width: info.width,
+        height: info.height,
+        resolution: info.resolution,
+        ox: position.x,
+        oy: position.y,
+        sin: Math.sin(yaw),
+        cos: Math.cos(yaw),
+        yaw
+      };
+    }
+    function worldToCanvas(x, y) {
+      const transform = state.mapTransform;
+      if (!transform) return null;
+      const dx = x - transform.ox, dy = y - transform.oy;
+      const mx = (dx * transform.cos + dy * transform.sin) / transform.resolution;
+      const my = (-dx * transform.sin + dy * transform.cos) / transform.resolution;
+      return {x: mx, y: transform.height - 1 - my};
+    }
+    function canvasToWorld(px, py) {
+      const transform = state.mapTransform;
+      if (!transform) return null;
+      const mx = px, my = transform.height - 1 - py;
+      const lx = (mx + .5) * transform.resolution, ly = (my + .5) * transform.resolution;
+      return {
+        x: transform.ox + lx * transform.cos - ly * transform.sin,
+        y: transform.oy + lx * transform.sin + ly * transform.cos
+      };
+    }
+    function eventToCanvas(event) {
+      const rect = canvas.getBoundingClientRect();
+      return {
+        x: (event.clientX - rect.left) * canvas.width / rect.width,
+        y: (event.clientY - rect.top) * canvas.height / rect.height
+      };
+    }
+    function scheduleRender() {
+      if (state.renderPending) return;
+      state.renderPending = true;
+      requestAnimationFrame(() => { state.renderPending = false; render(); });
+    }
+    function drawArrow(point, yaw, color, length, width, context = overlayContext) {
+      if (!point) return;
+      context.save();
+      context.translate(point.x, point.y);
+      context.rotate(-yaw);
+      context.strokeStyle = color;
+      context.fillStyle = color;
+      context.lineWidth = width;
+      context.beginPath(); context.moveTo(-length * .35, 0); context.lineTo(length, 0); context.stroke();
+      context.beginPath(); context.moveTo(length, 0); context.lineTo(length - width * 2, -width * 1.4);
+      context.lineTo(length - width * 2, width * 1.4); context.closePath(); context.fill();
+      context.restore();
+    }
+    function drawPath(path, color, context = pathContext) {
+      if (!path || !path.poses || !path.poses.length) return;
+      context.save(); context.strokeStyle = color; context.lineWidth = 2; context.beginPath();
+      let started = false;
+      path.poses.forEach(p => {
+        const point = worldToCanvas(p.pose.position.x, p.pose.position.y);
+        if (!point) return;
+        if (!started) { context.moveTo(point.x, point.y); started = true; }
+        else context.lineTo(point.x, point.y);
+      });
+      context.stroke(); context.restore();
+    }
+    function resizeCanvases(width, height) {
+      [mapCanvas, scanCanvas, pathCanvas, overlayCanvas].forEach(layer => {
+        if (layer.width !== width || layer.height !== height) {
+          layer.width = width;
+          layer.height = height;
+        }
+      });
+    }
+    function clearLayer(context) {
+      context.clearRect(0, 0, context.canvas.width, context.canvas.height);
+    }
+    function rebuildMapLayer(map) {
+      const info = map.info, width = info.width, height = info.height;
+      resizeCanvases(width, height);
+      const image = mapContext.createImageData(width, height);
+      const data = map.data || [];
+      for (let y = 0; y < height; y++) {
+        for (let x = 0; x < width; x++) {
+          const value = Number(data[y * width + x]);
+          const pixel = ((height - 1 - y) * width + x) * 4;
+          const shade = value < 0 ? 132 : Math.max(0, 255 - Math.round(value * 2.55));
+          image.data[pixel] = shade;
+          image.data[pixel + 1] = shade;
+          image.data[pixel + 2] = shade;
+          image.data[pixel + 3] = 255;
+        }
+      }
+      mapContext.putImageData(image, 0, 0);
+    }
+    function drawScanLayer() {
+      clearLayer(scanContext);
+      if (!state.scan || !state.mapTransform) return;
+      scanContext.fillStyle = '#e87510';
+      const points = state.scan.points || [];
+      const width = state.mapTransform.width, height = state.mapTransform.height;
+      for (let index = 0; index + 1 < points.length; index += 2) {
+        const point = worldToCanvas(points[index], points[index + 1]);
+        if (point && point.x >= 0 && point.y >= 0 && point.x < width && point.y < height) {
+          scanContext.fillRect(point.x, point.y, 2, 2);
+        }
+      }
+    }
+    function drawPathLayer() {
+      clearLayer(pathContext);
+      drawPath(state.path, '#4b54d9');
+    }
+    function drawOverlayLayer() {
+      clearLayer(overlayContext);
+      if (!state.mapTransform) return;
+      if (state.goal) {
+        const point = worldToCanvas(state.goal.position.x, state.goal.position.y);
+        if (point) {
+          overlayContext.fillStyle = '#d11b38';
+          overlayContext.beginPath();
+          overlayContext.arc(point.x, point.y, 5, 0, Math.PI * 2);
+          overlayContext.fill();
+          drawArrow(point, state.goal.yaw, '#d11b38', 18, 3);
+        }
+      }
+      if (state.pose) {
+        const p = state.pose.pose, point = worldToCanvas(p.position.x, p.position.y);
+        if (point) {
+          overlayContext.fillStyle = '#1469db';
+          overlayContext.beginPath();
+          overlayContext.arc(point.x, point.y, 5, 0, Math.PI * 2);
+          overlayContext.fill();
+          drawArrow(point, yawFromQuaternion(p.orientation), '#1469db', 22, 3);
+        }
+      }
+    }
+    function render() {
+      if (!state.map) {
+        clearLayer(mapContext);
+        clearLayer(scanContext);
+        clearLayer(pathContext);
+        clearLayer(overlayContext);
+        return;
+      }
+      if (state.dirty.map) { rebuildMapLayer(state.map); state.dirty.map = false; }
+      if (state.dirty.scan) { drawScanLayer(); state.dirty.scan = false; }
+      if (state.dirty.path) { drawPathLayer(); state.dirty.path = false; }
+      if (state.dirty.overlay) { drawOverlayLayer(); state.dirty.overlay = false; }
+    }
+
+    function setGoalInteraction() {
+      state.interaction = 'goal';
+      $('mapHint').textContent = 'Đang đặt goal: bấm một lần trên map để chọn điểm B.';
+    }
+    function createPoseMessage(world, yaw) {
+      // Browser and robot clocks can differ. A zero stamp asks ROS to use the
+      // latest transform and avoids rejecting an otherwise valid web pose.
+      return {header: {stamp: {sec: 0, nanosec: 0}, frame_id: 'map'}, pose: {
+        position: {x: world.x, y: world.y, z: 0}, orientation: quaternionFromYaw(yaw)
+      }};
+    }
+    function updateGoButton() {
+      const button = $('goButton');
+      button.disabled = !state.goal
+        || !realtimeRos.connected
+        || !state.localized
+        || state.navigationActive;
+      $('setGoal').disabled = !realtimeRos.connected || state.navigationActive;
+      if (!realtimeRos.connected) button.title = 'Chờ kết nối WebSocket';
+      else if (!state.localized) button.title = 'Chờ SLAM xác định vị trí robot';
+      else if (!state.goal) button.title = 'Bấm Set Goal để chọn điểm B';
+      else if (state.navigationActive) button.title = 'Robot đang di chuyển';
+      else button.title = 'Bắt đầu điều hướng tới điểm B';
+    }
+    function publishGoal() {
+      if (!state.goal) return;
+      if (!realtimeRos.connected) {
+        $('mapHint').textContent = 'Mất kết nối WebSocket. Hãy chờ kết nối lại rồi thử GO.';
+        return;
+      }
+      if (!state.localized) {
+        $('mapHint').textContent = 'SLAM chưa xác định được vị trí robot. Hãy chờ map và dấu robot màu xanh xuất hiện.';
+        return;
+      }
+      stopKeyboard();
+      state.navigationActive = true;
+      realtimeRos.publish('/web/control_mode', 'std_msgs/msg/String', {data: 'nav'});
+      realtimeRos.publish('/web/goal_pose', 'geometry_msgs/msg/PoseStamped', createPoseMessage(state.goal.position, state.goal.yaw));
+      $('cancelButton').disabled = false;
+    }
+    function cancelNavigation() {
+      if (!realtimeRos.connected) return;
+      realtimeRos.publish('/web/cancel_navigation', 'std_msgs/msg/Empty', {});
+      realtimeRos.publish('/web/control_mode', 'std_msgs/msg/String', {data: 'manual'});
+      state.navigationActive = false;
+      $('cancelButton').disabled = true;
+    }
+    function publishManualCommand(command) {
+      state.manualCommand = command;
+      realtimeRos.publish('/web/cmd_vel_manual', 'geometry_msgs/msg/Twist', command);
+    }
+    function stopKeyboard(sendStop = true) {
+      const wasActive = state.keyboardActive || state.keyboardKeys.size > 0;
+      state.keyboardKeys.clear();
+      state.keyboardActive = false;
+      if (sendStop && wasActive) publishManualCommand(zeroTwist());
+    }
+    function zeroTwist() { return {linear: {x: 0, y: 0, z: 0}, angular: {x: 0, y: 0, z: 0}}; }
+    function arrowMotion(x, y) {
+      return {linear: {x: -y * .22, y: 0, z: 0}, angular: {x: 0, y: 0, z: x * .55}};
+    }
+    function isArrowKey(key) {
+      return key === 'ArrowUp' || key === 'ArrowDown' || key === 'ArrowLeft' || key === 'ArrowRight';
+    }
+    function keyboardCommand() {
+      const forward = (state.keyboardKeys.has('ArrowUp') ? 1 : 0)
+        - (state.keyboardKeys.has('ArrowDown') ? 1 : 0);
+      const turn = (state.keyboardKeys.has('ArrowLeft') ? 1 : 0)
+        - (state.keyboardKeys.has('ArrowRight') ? 1 : 0);
+      return arrowMotion(turn, -forward);
+    }
+    function publishKeyboardCommand() {
+      if (state.navigationActive || state.keyboardKeys.size === 0) {
+        stopKeyboard();
+        return;
+      }
+      state.keyboardActive = true;
+      publishManualCommand(keyboardCommand());
+    }
+
+    canvas.addEventListener('pointerdown', event => {
+      if (!state.map || state.interaction === 'none') return;
+      canvas.setPointerCapture(event.pointerId);
+      const p = eventToCanvas(event), world = canvasToWorld(p.x, p.y);
+      if (!world) return;
+      if (state.interaction === 'goal') {
+        // Keep goal selection deliberately simple: position only, fixed yaw.
+        state.goal = {position: world, yaw: 0};
+        state.dirty.overlay = true;
+        updateGoButton();
+        $('mapHint').textContent = state.localized
+          ? 'Đã chọn B. Kiểm tra vị trí rồi bấm GO.'
+          : 'Đã chọn B. Đang chờ SLAM xác định vị trí robot để bật nút GO.';
+      }
+      scheduleRender();
+    });
+    canvas.addEventListener('pointerup', event => {
+      if (canvas.hasPointerCapture(event.pointerId)) canvas.releasePointerCapture(event.pointerId);
+    });
+    canvas.addEventListener('pointercancel', event => {
+      if (canvas.hasPointerCapture(event.pointerId)) canvas.releasePointerCapture(event.pointerId);
+    });
+
+    document.addEventListener('keydown', event => {
+      if (!isArrowKey(event.key)) return;
+      const target = event.target;
+      if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement
+          || target instanceof HTMLSelectElement || target.isContentEditable) return;
+      event.preventDefault();
+      if (state.navigationActive) return;
+      state.keyboardKeys.add(event.key);
+      publishKeyboardCommand();
+    });
+    document.addEventListener('keyup', event => {
+      if (!isArrowKey(event.key)) return;
+      const target = event.target;
+      if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement
+          || target instanceof HTMLSelectElement || target.isContentEditable) return;
+      event.preventDefault();
+      state.keyboardKeys.delete(event.key);
+      publishKeyboardCommand();
+    });
+    window.addEventListener('blur', stopKeyboard);
+
+    $('setGoal').onclick = setGoalInteraction;
+    $('goButton').onclick = publishGoal;
+    $('cancelButton').onclick = cancelNavigation;
+    bulkRos.subscribe('/web/map', 'nav_msgs/msg/OccupancyGrid', msg => {
+      state.map = msg;
+      updateMapTransform(msg);
+      state.dirty.map = true;
+      state.dirty.scan = true;
+      state.dirty.path = true;
+      state.dirty.overlay = true;
+      markSensor('map');
+      scheduleRender();
+    }, 500);
+    realtimeRos.subscribe('/robot_pose', 'geometry_msgs/msg/PoseStamped', msg => {
+      state.localized = true;
+      state.pose = msg;
+      state.dirty.overlay = true;
+      markSensor('pose');
+      updateGoButton();
+      scheduleRender();
+    }, 50);
+    realtimeRos.subscribe('/web/scan_points', 'bringup/msg/ScanPoints', msg => {
+      if (Number.isFinite(msg.seq) && msg.seq <= state.scanSequence) return;
+      if (Number.isFinite(msg.seq)) state.scanSequence = msg.seq;
+      state.scan = msg;
+      state.dirty.scan = true;
+      markSensor('scan');
+      scheduleRender();
+    }, 200);
+    bulkRos.subscribe('/plan', 'nav_msgs/msg/Path', msg => {
+      state.path = msg;
+      state.dirty.path = true;
+      scheduleRender();
+    }, 250);
+    realtimeRos.subscribe('/web/nav_status', 'std_msgs/msg/String', msg => {
+      try {
+        const data = JSON.parse(msg.data);
+        if (data.state === 'PLANNING' || data.state === 'MOVING') {
+          state.navigationActive = true;
+          $('cancelButton').disabled = false;
+        } else if (['SUCCEEDED', 'CANCELED', 'FAILED', 'ERROR', 'IDLE'].includes(data.state)) {
+          state.navigationActive = false;
+          $('cancelButton').disabled = true;
+          realtimeRos.publish('/web/control_mode', 'std_msgs/msg/String', {data: 'manual'});
+        }
+        updateGoButton();
+      }
+      catch (_) {}
+    }, 0);
+    $('camera').src = cameraUrl;
+    checkCameraHealth();
+    setInterval(checkCameraHealth, 2000);
+    setInterval(() => {
+      if (!state.navigationActive && state.keyboardActive && state.manualCommand) {
+        realtimeRos.publish('/web/cmd_vel_manual', 'geometry_msgs/msg/Twist', state.manualCommand);
+      }
+    }, 100);
+    window.addEventListener('beforeunload', () => {
+      realtimeRos.publish('/web/cmd_vel_manual', 'geometry_msgs/msg/Twist', zeroTwist());
+      realtimeRos.publish('/web/cancel_navigation', 'std_msgs/msg/Empty', {});
+    });
+    scheduleRender();
+  </script>
+</body>
+</html>

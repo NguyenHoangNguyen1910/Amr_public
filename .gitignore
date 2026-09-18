@@ -1,0 +1,39 @@
+# macOS / editor files
+.DS_Store
+.vscode/
+.idea/
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.egg-info/
+.venv/
+venv/
+env/
+
+# ROS 2 / colcon generated files
+build/
+install/
+log/
+**/build/
+**/install/
+**/log/
+
+# Runtime logs and local configuration
+*.log
+*.pid
+.env
+.env.*
+!.env.example
+
+# Generated maps and temporary files
+*.bag
+*.db3
+*.pdf
+*.yaml.bak
+*.swp
+*.tmp
