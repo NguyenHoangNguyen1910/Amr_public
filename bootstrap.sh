@@ -6,6 +6,7 @@ readonly AGENT_CONTAINER="${AGENT_CONTAINER:-yahboom-micro-ros-agent}"
 readonly SERIAL_DEVICE="${SERIAL_DEVICE:-/dev/ttyUSB0}"
 readonly SERIAL_BAUDRATE="${SERIAL_BAUDRATE:-921600}"
 readonly ROS_DOMAIN_ID="${ROS_DOMAIN_ID:-20}"
+readonly ROS_LOCALHOST_ONLY="${ROS_LOCALHOST_ONLY:-1}"
 readonly AUTO_RESET="${AUTO_RESET:-1}"
 readonly SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 
@@ -33,6 +34,7 @@ else
     --privileged \
     --net=host \
     --env="ROS_DOMAIN_ID=$ROS_DOMAIN_ID" \
+    --env="ROS_LOCALHOST_ONLY=$ROS_LOCALHOST_ONLY" \
     "$AGENT_IMAGE" \
     serial --dev "$SERIAL_DEVICE" -b "$SERIAL_BAUDRATE" -v4)"
 

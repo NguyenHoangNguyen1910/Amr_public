@@ -4,6 +4,7 @@ set -Eeuo pipefail
 readonly ROS_IMAGE="${ROS_IMAGE:-yahboomtechnology/ros-humble:4.0.3}"
 readonly ROS_CONTAINER="${ROS_CONTAINER:-yahboom-ros-main}"
 readonly ROS_DOMAIN_ID="${ROS_DOMAIN_ID:-20}"
+readonly ROS_LOCALHOST_ONLY="${ROS_LOCALHOST_ONLY:-1}"
 readonly SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 readonly MODE="${1:-}"
 
@@ -24,7 +25,10 @@ if docker ps --format '{{.Names}}' | grep -Fxq "$ROS_CONTAINER"; then
   fi
 
   echo "Entering the running Yahboom ROS container: $ROS_CONTAINER"
-  exec docker exec -it "$ROS_CONTAINER" bash -lc \
+  exec docker exec -it \
+    --env="ROS_DOMAIN_ID=$ROS_DOMAIN_ID" \
+    --env="ROS_LOCALHOST_ONLY=$ROS_LOCALHOST_ONLY" \
+    "$ROS_CONTAINER" bash -lc \
     'source /opt/ros/humble/setup.bash &&
      source /root/imu_ws/install/imu_complementary_filter/share/imu_complementary_filter/package.bash &&
      source /workspace/install/robot_localization/share/robot_localization/package.bash &&
@@ -43,6 +47,7 @@ docker_args=(
   --env="DISPLAY=${DISPLAY:-:0}"
   --env="QT_X11_NO_MITSHM=1"
   --env="ROS_DOMAIN_ID=$ROS_DOMAIN_ID"
+  --env="ROS_LOCALHOST_ONLY=$ROS_LOCALHOST_ONLY"
   -v /tmp/.X11-unix:/tmp/.X11-unix
   --security-opt apparmor:unconfined
   -v /dev/input:/dev/input
