@@ -12,8 +12,8 @@ custom_navigation:
     tf_timeout_seconds: 0.10
     occupied_threshold: 65
 
-    robot_radius_m: 0.22
-    safety_margin_m: 0.05
+    robot_radius_m: 0.05
+    safety_margin_m: 0.05  # global inflation = 0.10 m
     local_safety_margin_m: 0.03
     goal_tolerance_m: 0.12
     goal_terminal_entry_m: 0.20

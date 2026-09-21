@@ -52,6 +52,7 @@ docker run --rm \
 
 test -x "$WORKSPACE/install/robot_localization/lib/robot_localization/ekf_node"
 test -f "$WORKSPACE/install/bringup/share/bringup/msg/ScanPoints.idl"
+test -f "$WORKSPACE/install/bringup/share/bringup/action/NavigateToPose.idl"
 test -f "$WORKSPACE/install/bringup/share/bringup/launch/web.launch.py"
 test -x "$WORKSPACE/install/bringup/lib/bringup/camera_mjpeg.py"
 test -x "$WORKSPACE/install/bringup/lib/bringup/cmd_vel_arbiter.py"

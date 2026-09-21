@@ -10,7 +10,6 @@ from dataclasses import fields
 import numpy as np
 from builtin_interfaces.msg import Duration as DurationMessage
 from geometry_msgs.msg import PoseStamped, Twist
-from nav2_msgs.action import NavigateToPose
 from nav_msgs.msg import OccupancyGrid as RosOccupancyGrid
 from nav_msgs.msg import Odometry, Path
 from rclpy.action import ActionServer, CancelResponse, GoalResponse
@@ -27,6 +26,7 @@ from rclpy.time import Time
 from sensor_msgs.msg import LaserScan
 from tf2_ros import Buffer, TransformException, TransformListener
 
+from bringup.action import NavigateToPose
 from .config import DEFAULT_CONFIG, NavigationConfig
 from .global_planner import OccupancyGrid
 from .helpers import SensorDataError
@@ -206,7 +206,7 @@ class RosNavigationTransport:
 
 
 class CustomNavigationNode(Node):
-    """Expose CustomNavigator through the existing ROS/Nav2 action contract."""
+    """Expose CustomNavigator through the local navigation action contract."""
 
     def __init__(self):
         super().__init__("custom_navigation")

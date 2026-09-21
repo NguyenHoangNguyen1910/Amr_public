@@ -9,7 +9,7 @@ from dataclasses import dataclass
 class NavigationConfig:
     """Planner/controller parameters tuned for the current AMR baseline."""
 
-    robot_radius_m: float = 0.22
+    robot_radius_m: float = 0.05
     safety_margin_m: float = 0.05
     local_safety_margin_m: float = 0.03
     goal_tolerance_m: float = 0.12

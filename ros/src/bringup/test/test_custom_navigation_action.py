@@ -1,7 +1,7 @@
 import unittest
 
 import rclpy
-from nav2_msgs.action import NavigateToPose
+from bringup.action import NavigateToPose
 
 from custom_navigation.ros_adapter import CustomNavigationNode
 

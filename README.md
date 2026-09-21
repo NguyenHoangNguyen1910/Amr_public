@@ -1,6 +1,6 @@
 # AMR
 
-Mobile robot platform with ROS 2, selectable Nav2/custom navigation, and a web UI.
+Mobile robot platform with ROS 2, custom navigation, and a web UI.
 
 ![AMR Web UI demo](docs/demo.jpg)
 
@@ -29,7 +29,7 @@ Main data flows:
 
 ```text
 Browser / tablet
-├── Goal:   /web/goal_pose ───────────────> web_bridge ─> Nav2/custom ─> /cmd_vel_nav ─┐
+├── Goal:   /web/goal_pose ───────────────> web_bridge ─> custom navigation ─> /cmd_vel_nav ─┐
 ├── Manual: /web/cmd_vel_manual ────────────────────────────────────────────────┼─> cmd_vel_arbiter ─> /cmd_vel ─> Agent ─> ESP32 ─> Motor
 ├── Mode:   /web/control_mode ──────────────────────────────────────────────────┘
 ├── Map:    /web/map <──────────────────── web_bridge <─ /map <─ slam_toolbox <─ /scan (LiDAR)
@@ -56,20 +56,19 @@ Open the container shell:
 ./shell.sh
 ```
 
-Inside the container, start ROS 2 with Nav2 (rollback/default during integration):
+Inside the container, start ROS 2 with custom navigation:
 
 ```bash
 ros2 launch bringup web.launch.py
 ```
 
-Run the custom backend explicitly:
+The launch file accepts the explicit custom backend argument as well:
 
 ```bash
 ros2 launch bringup web.launch.py navigation_backend:=custom
 ```
 
-Use only one backend at a time. The custom backend keeps the existing
-`/navigate_to_pose` action contract and publishes navigation commands to
+The custom backend owns `/navigate_to_pose` and publishes navigation commands to
 `/cmd_vel_nav`; `cmd_vel_arbiter.py` remains the final safety gate.
 
 ### Web UI

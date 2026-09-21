@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 
-"""Bridge robot state, laser data, and Nav2 control to the web app."""
+"""Bridge robot state, laser data, and custom navigation to the web app."""
 
 import json
 import math
@@ -10,7 +10,6 @@ import rclpy
 from action_msgs.msg import GoalStatus
 from geometry_msgs.msg import PoseStamped, PoseWithCovarianceStamped
 from nav_msgs.msg import OccupancyGrid
-from nav2_msgs.action import NavigateToPose
 from rclpy.action import ActionClient
 from rclpy.duration import Duration
 from rclpy.executors import ExternalShutdownException, MultiThreadedExecutor
@@ -25,11 +24,12 @@ from rclpy.time import Time
 from sensor_msgs.msg import LaserScan
 from std_msgs.msg import Bool, Empty, String
 from tf2_ros import Buffer, TransformException, TransformListener
+from bringup.action import NavigateToPose
 from bringup.msg import ScanPoints
 
 
 class WebBridge(Node):
-    """Expose robot pose, laser points, and Nav2 control to the web app."""
+    """Expose robot pose, laser points, and custom navigation to the web app."""
 
     def __init__(self):
         super().__init__('web_bridge')
@@ -270,13 +270,13 @@ class WebBridge(Node):
             self.goal_handle = None
 
         if not self.action_client.wait_for_server(timeout_sec=2.0):
-            self.publish_status('ERROR', 'Nav2 action server is not available')
+            self.publish_status('ERROR', 'Navigation action server is not available')
             return
 
         goal = NavigateToPose.Goal()
         goal.pose = message
         self.active_goal_publisher.publish(message)
-        self.publish_status('PLANNING', 'sending goal to Nav2')
+        self.publish_status('PLANNING', 'sending goal to custom navigation')
         future = self.action_client.send_goal_async(
             goal,
             feedback_callback=lambda feedback: self.feedback_callback(
@@ -291,11 +291,11 @@ class WebBridge(Node):
         try:
             handle = future.result()
         except Exception as error:
-            self.publish_status('ERROR', 'Nav2 rejected goal: %s' % error)
+            self.publish_status('ERROR', 'Navigation rejected goal: %s' % error)
             return
 
         if not handle.accepted:
-            self.publish_status('FAILED', 'Nav2 rejected the goal')
+            self.publish_status('FAILED', 'Navigation rejected the goal')
             return
 
         self.goal_handle = handle
@@ -321,17 +321,17 @@ class WebBridge(Node):
         except Exception as error:
             self.goal_handle = None
             self.publish_status(
-                'ERROR', 'failed to read Nav2 result: %s' % error)
+                'ERROR', 'failed to read navigation result: %s' % error)
             return
 
         self.goal_handle = None
         states = {
             GoalStatus.STATUS_SUCCEEDED: ('SUCCEEDED', 'goal reached'),
             GoalStatus.STATUS_CANCELED: ('CANCELED', 'goal canceled'),
-            GoalStatus.STATUS_ABORTED: ('FAILED', 'Nav2 aborted the goal'),
+            GoalStatus.STATUS_ABORTED: ('FAILED', 'Navigation aborted the goal'),
         }
         state, message = states.get(
-            status, ('FAILED', 'Nav2 finished with status %s' % status))
+            status, ('FAILED', 'Navigation finished with status %s' % status))
         self.publish_status(state, message)
 
     def cancel_callback(self, _message):

@@ -147,6 +147,62 @@
       text-overflow: ellipsis;
       white-space: nowrap;
     }
+    .pose-readouts {
+      align-items: center;
+      display: flex;
+      flex-wrap: wrap;
+      gap: .25rem .8rem;
+      margin: 0;
+    }
+    .pose-card {
+      align-items: center;
+      display: flex;
+      gap: .3rem;
+      min-width: 0;
+    }
+    .pose-card-header {
+      align-items: center;
+      display: flex;
+      gap: .3rem;
+    }
+    .pose-label {
+      align-items: center;
+      border-radius: 50%;
+      color: #fff;
+      display: inline-flex;
+      flex: 0 0 auto;
+      font-size: .8rem;
+      font-weight: 800;
+      height: 1.35rem;
+      justify-content: center;
+      width: 1.35rem;
+    }
+    .pose-label.robot { background: #1469db; }
+    .pose-label.goal { background: #d11b38; }
+    .pose-card-title,
+    .pose-card-frame { display: none; }
+    .pose-values {
+      align-items: baseline;
+      display: flex;
+      gap: .45rem;
+    }
+    .pose-value {
+      align-items: baseline;
+      display: inline-flex;
+      gap: .12rem;
+      white-space: nowrap;
+    }
+    .pose-value-label {
+      color: var(--muted);
+      display: inline;
+      font-size: .78rem;
+    }
+    .pose-value-number {
+      color: var(--ink);
+      display: inline;
+      font-variant-numeric: tabular-nums;
+      font-size: .82rem;
+    }
     .sensor-summary {
       cursor: help;
       display: inline-flex;
@@ -209,6 +265,28 @@
         <button id="goButton" class="primary" disabled>GO</button>
         <button id="cancelButton" disabled>Cancel</button>
         <span class="spacer"></span>
+        <div class="pose-readouts" aria-label="Tọa độ robot và target trong frame map">
+          <section class="pose-card" aria-label="Vị trí hiện tại A">
+            <div class="pose-card-header">
+              <span class="pose-label robot" aria-hidden="true">A</span>
+            </div>
+            <div class="pose-values">
+              <div class="pose-value"><span class="pose-value-label">x</span><strong id="poseAx" class="pose-value-number">—</strong></div>
+              <div class="pose-value"><span class="pose-value-label">y</span><strong id="poseAy" class="pose-value-number">—</strong></div>
+              <div class="pose-value"><span class="pose-value-label">yaw</span><strong id="poseAyaw" class="pose-value-number">—</strong></div>
+            </div>
+          </section>
+          <section class="pose-card" aria-label="Vị trí target B">
+            <div class="pose-card-header">
+              <span class="pose-label goal" aria-hidden="true">B</span>
+            </div>
+            <div class="pose-values">
+              <div class="pose-value"><span class="pose-value-label">x</span><strong id="poseBx" class="pose-value-number">—</strong></div>
+              <div class="pose-value"><span class="pose-value-label">y</span><strong id="poseBy" class="pose-value-number">—</strong></div>
+              <div class="pose-value"><span class="pose-value-label">yaw</span><strong id="poseByaw" class="pose-value-number">—</strong></div>
+            </div>
+          </section>
+        </div>
         <div class="status-inline" aria-label="Robot status">
           <span id="sensorSummary" class="sensor-summary"
                 tabindex="0"
@@ -349,6 +427,29 @@
     }
     function quaternionFromYaw(yaw) {
       return {x: 0, y: 0, z: Math.sin(yaw / 2), w: Math.cos(yaw / 2)};
+    }
+    function formatPoseNumber(value) {
+      return Number.isFinite(Number(value)) ? Number(value).toFixed(3) : '—';
+    }
+    function updatePoseReadouts() {
+      const robotPose = state.pose && state.pose.pose;
+      const robotYaw = robotPose
+        ? yawFromQuaternion(robotPose.orientation || {x: 0, y: 0, z: 0, w: 1})
+        : null;
+      const targetPose = state.goal
+        ? {position: state.goal.position, yaw: state.goal.yaw}
+        : null;
+      const values = {
+        poseAx: robotPose && robotPose.position ? robotPose.position.x : null,
+        poseAy: robotPose && robotPose.position ? robotPose.position.y : null,
+        poseAyaw: robotYaw,
+        poseBx: targetPose && targetPose.position ? targetPose.position.x : null,
+        poseBy: targetPose && targetPose.position ? targetPose.position.y : null,
+        poseByaw: targetPose ? targetPose.yaw : null
+      };
+      Object.entries(values).forEach(([id, value]) => {
+        $(id).textContent = formatPoseNumber(value);
+      });
     }
     const sensorLabels = {
       map: 'Map', pose: 'Robot pose', scan: 'LiDAR', camera: 'Camera'
@@ -613,6 +714,7 @@
         // Keep goal selection deliberately simple: position only, fixed yaw.
         state.goal = {position: world, yaw: 0};
         state.dirty.overlay = true;
+        updatePoseReadouts();
         updateGoButton();
         $('mapHint').textContent = state.localized
           ? 'Đã chọn B. Kiểm tra vị trí rồi bấm GO.'
@@ -665,6 +767,7 @@
       state.localized = true;
       state.pose = msg;
       state.dirty.overlay = true;
+      updatePoseReadouts();
       markSensor('pose');
       updateGoButton();
       scheduleRender();

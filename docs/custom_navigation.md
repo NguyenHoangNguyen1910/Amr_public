@@ -1,9 +1,8 @@
-# Custom Navigation Integration Plan
+# Custom Navigation Integration
 
 ## 1. Mục tiêu
 
-Thay Nav2 đang chạy trong `ros/src/bringup/launch/web.launch.py` bằng backend
-navigation custom sử dụng Dijkstra cost-to-go và DWA-lite từ repository tham
+Tích hợp backend navigation custom sử dụng Dijkstra cost-to-go và DWA-lite từ repository tham
 khảo:
 
 ```text
@@ -27,8 +26,7 @@ Kết quả mong muốn:
 - `cmd_vel_arbiter.py` vẫn là nơi duy nhất chọn manual/navigation, giới hạn vận
   tốc và publish `/cmd_vel` tới ESP32.
 - Dùng `/map` của `slam_toolbox`, pose từ TF và dữ liệu `/scan`, `/odom` hiện có.
-- Có thể quay lại Nav2 bằng launch argument trong thời gian kiểm thử; Nav2 và
-  custom navigation không được chạy đồng thời.
+- Chỉ chạy custom navigation; launch file từ chối backend khác.
 
 ## 2. Ngoài phạm vi
 
@@ -39,7 +37,7 @@ Giai đoạn này không thực hiện:
 - Thay đổi firmware ESP32, micro-ROS Agent hoặc topic `/cmd_vel`.
 - Thay đổi giao thức giữa browser và rosbridge.
 - Thay `slam_toolbox`, EKF hoặc cây TF hiện tại.
-- Xóa `nav2.yaml` trước khi custom backend vượt qua kiểm thử thực tế.
+- Không giữ thêm cấu hình hoặc runtime navigation dư thừa ngoài custom backend.
 
 ## 3. Kiến trúc mục tiêu
 
@@ -52,7 +50,7 @@ Browser
    │
    ▼
 web_bridge.py
-   │  nav2_msgs/action/NavigateToPose
+   │  bringup/action/NavigateToPose
    ▼
 /navigate_to_pose
    │
@@ -75,9 +73,8 @@ custom_navigation_node.py
              micro-ROS / ESP32
 ```
 
-Custom node sử dụng cùng action type `nav2_msgs/action/NavigateToPose`. Đây chỉ
-là contract ROS giữa `web_bridge.py` và backend; nó không yêu cầu chạy planner,
-controller, behavior tree hoặc lifecycle manager của Nav2.
+Custom node và `web_bridge.py` dùng action type nội bộ
+`bringup/action/NavigateToPose`; đây là contract ROS duy nhất của navigation.
 
 ## 4. File dự kiến thêm và sửa
 
@@ -118,23 +115,21 @@ Vai trò:
 
 | File | Thay đổi |
 |---|---|
-| `ros/src/bringup/launch/web.launch.py` | Thêm launch argument `navigation_backend`; chạy custom node khi giá trị là `custom`, chỉ chạy các node Nav2/lifecycle khi giá trị là `nav2` |
+| `ros/src/bringup/launch/web.launch.py` | Khởi chạy duy nhất custom node và validate `navigation_backend:=custom` |
 | `ros/src/bringup/CMakeLists.txt` | Cài executable, Python package và config mới |
 | `ros/src/bringup/package.xml` | Khai báo Python/NumPy và các ROS dependency trực tiếp của custom node |
 | `build.sh` | Kiểm tra executable, module và config custom đã được cài đúng |
 | `README.md` | Cập nhật topology và lệnh chạy backend mặc định sau khi nghiệm thu |
-| `docs/web_topics.md` | Đổi các mô tả phụ thuộc Nav2 thành navigation backend và ghi rõ `/plan` do custom node publish |
+| `docs/web_topics.md` | Ghi rõ custom node publish `/plan` và nhận goal qua local action |
 
 ### 4.3. File giữ nguyên hành vi
 
-- `ros/src/bringup/scripts/web_bridge.py` tiếp tục gửi
+- `ros/src/bringup/scripts/web_bridge.py` tiếp tục gửi local
   `NavigateToPose.Goal`, nhận feedback và xử lý action result.
 - `ros/src/bringup/scripts/cmd_vel_arbiter.py` tiếp tục nhận
   `/cmd_vel_nav`, áp giới hạn và timeout rồi mới publish `/cmd_vel`.
 - `ros/src/bringup/config/slam.yaml` tiếp tục cung cấp map và TF.
 - `web/index.html` không đổi topic hoặc schema message.
-- `ros/src/bringup/config/nav2.yaml` được giữ lại để rollback nhưng không được
-  custom backend sử dụng.
 
 ## 5. Phạm vi code được copy
 
@@ -153,7 +148,7 @@ Không copy:
 
 - `src/transport.py`, vì file này dùng Gazebo Transport.
 - `src/server.py`, FastAPI adapter và HTTP gateway.
-- `src/navigation/factory.py` và `src/navigation/nav2`.
+- `src/navigation/factory.py` và các adapter navigation không dùng trong ROS runtime.
 - Static map của simulator trong `src/sim/maps`.
 
 Sau khi copy, import phải đổi sang relative import trong package
@@ -273,7 +268,7 @@ planner thực sự theo. Publish empty path khi cancel, failure hoặc goal ho�
 Custom node cung cấp:
 
 ```text
-/navigate_to_pose  nav2_msgs/action/NavigateToPose
+/navigate_to_pose  bringup/action/NavigateToPose
 ```
 
 Luồng action:
@@ -330,8 +325,8 @@ custom_navigation:
     cmd_vel_topic: /cmd_vel_nav
     plan_topic: /plan
 
-    robot_radius_m: 0.22
-    safety_margin_m: 0.05
+    robot_radius_m: 0.05
+    safety_margin_m: 0.05  # global inflation = 0.10 m
     occupied_threshold: 65
 
     max_linear_velocity_mps: 0.22
@@ -351,27 +346,21 @@ Các trọng số DWA, lookahead, prediction horizon, sample count và clearance
 copy làm điểm bắt đầu nhưng phải benchmark trên Raspberry Pi 5 và tune với vận
 tốc thấp của robot thật.
 
-## 10. Launch và chuyển backend
+## 10. Launch custom navigation
 
-Thêm launch argument:
+Lệnh chạy:
 
 ```bash
 ros2 launch bringup web.launch.py navigation_backend:=custom
-ros2 launch bringup web.launch.py navigation_backend:=nav2
 ```
 
 Quy tắc:
 
-- `custom`: chạy `custom_navigation_node.py`; không chạy controller, smoother,
-  planner, behavior, BT navigator, waypoint follower, velocity smoother và
-  lifecycle manager của Nav2.
-- `nav2`: giữ hành vi launch hiện tại; không chạy custom node.
-- Mọi giá trị khác làm launch fail sớm với thông báo rõ ràng.
-- Trong giai đoạn tích hợp, default giữ là `nav2` cho tới khi test bench pass.
-- Sau khi test bench và robot pass, đổi default sang `custom`.
-
-Việc giữ lựa chọn `nav2` là cơ chế rollback trong giai đoạn nghiệm thu, không
-phải chạy hai backend song song.
+- `custom_navigation_node.py` là navigation node duy nhất.
+- `navigation_backend` chỉ nhận giá trị `custom`; giá trị khác làm launch fail
+  sớm với thông báo rõ ràng.
+- Launch không tạo thêm planner, controller, smoother, behavior hoặc lifecycle
+  navigation process nào khác.
 
 ## 11. An toàn và concurrency
 
@@ -426,15 +415,14 @@ không phụ thuộc riêng vào arbiter cho trạng thái action.
 
 ### Giai đoạn 3: Tích hợp launch
 
-1. Thêm `navigation_backend` và condition vào `web.launch.py`.
-2. Cập nhật install/dependency/build checks.
+1. Khởi chạy `custom_navigation_node.py` từ `web.launch.py`.
+2. Cập nhật action interface, install/dependency và build checks.
 3. Build workspace trong container hiện tại.
 4. Kiểm tra chỉ có một action server `/navigate_to_pose`.
 
 Điều kiện hoàn tất:
 
-- `navigation_backend:=nav2` vẫn khởi động như trước.
-- `navigation_backend:=custom` không chạy Nav2 process nào.
+- Launch chỉ khởi động custom navigation process.
 - `ros2 action list` có đúng một `/navigate_to_pose`.
 - `/cmd_vel_nav` chỉ có một publisher navigation.
 
@@ -494,8 +482,8 @@ ros2 topic hz /odom
 ros2 run tf2_ros tf2_echo map base_footprint
 ```
 
-Các kiểm tra bổ sung phải xác nhận không có process Nav2 khi backend là
-`custom` và không có custom process khi backend là `nav2`.
+Các kiểm tra bổ sung phải xác nhận chỉ có một custom navigation process và một
+action server `/navigate_to_pose`.
 
 ## 14. Tiêu chí nghiệm thu
 
@@ -511,15 +499,8 @@ Custom navigation chỉ được đặt làm backend mặc định khi đạt t�
 - Cancel/emergency/sensor timeout/TF failure/shutdown đều tạo zero command.
 - Không có hai publisher navigation cạnh tranh.
 - CPU trên Raspberry Pi 5 đủ để giữ control loop và command heartbeat ổn định.
-- Backend Nav2 vẫn có thể chọn lại để rollback trong thời gian nghiệm thu.
-
-Sau khi đạt các tiêu chí trên:
-
-1. Đổi default `navigation_backend` từ `nav2` sang `custom`.
-2. Cập nhật README và tài liệu topic.
-3. Chạy soak test tối thiểu 30 phút với nhiều goal/cancel liên tiếp.
-4. Chỉ cân nhắc xóa dependency/runtime Nav2 ở một thay đổi riêng sau khi hết
-   thời gian rollback.
+- Cập nhật README và tài liệu topic.
+- Chạy soak test tối thiểu 30 phút với nhiều goal/cancel liên tiếp.
 
 ## 15. Rủi ro chính
 
@@ -531,5 +512,5 @@ Sau khi đạt các tiêu chí trên:
 | Dijkstra/inflation tốn CPU khi map lớn | Snapshot map theo goal, benchmark thời gian plan, giới hạn tần suất rebuild và tối ưu distance transform nếu cần |
 | Map đổi trong khi mission đang chạy | Dùng map revision, không mutate grid trong control thread và replan an toàn tới cùng goal khi metadata đổi |
 | TF hoặc sensor mất tạm thời | Freshness timeout, abort action và publish zero |
-| Custom node và Nav2 cùng chạy | Launch condition loại trừ lẫn nhau và graph check trong test |
+| Có nhiều custom navigation node cùng chạy | Launch chỉ tạo một node và graph check trong test |
 | Action callback bị block bởi planner | Chạy tính toán ngoài ROS callback/mission lock và dùng revision để hủy kết quả cũ |

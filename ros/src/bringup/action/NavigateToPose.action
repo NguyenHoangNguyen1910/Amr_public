@@ -1,0 +1,11 @@
+# Goal
+geometry_msgs/PoseStamped pose
+---
+# Result
+---
+# Feedback
+geometry_msgs/PoseStamped current_pose
+float32 distance_remaining
+builtin_interfaces/Duration navigation_time
+builtin_interfaces/Duration estimated_time_remaining
+int16 number_of_recoveries
