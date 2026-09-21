@@ -1,0 +1,535 @@
+# Custom Navigation Integration Plan
+
+## 1. Mục tiêu
+
+Thay Nav2 đang chạy trong `ros/src/bringup/launch/web.launch.py` bằng backend
+navigation custom sử dụng Dijkstra cost-to-go và DWA-lite từ repository tham
+khảo:
+
+```text
+/home/pi/quangnv/bk/amr/src/navigation/custom
+```
+
+Repository tham khảo chỉ được đọc. Mọi file cần thiết phải được copy sang và
+chỉnh sửa trong:
+
+```text
+/home/pi/quangnv/amr
+```
+
+Kết quả mong muốn:
+
+- Không thay đổi Web UI hoặc ROS topic mà Web UI đang dùng.
+- Không thay đổi luồng điều khiển manual.
+- Giữ `web_bridge.py` làm client của action `/navigate_to_pose`.
+- Custom navigation publish vận tốc vào `/cmd_vel_nav`; không publish trực tiếp
+  vào `/cmd_vel`.
+- `cmd_vel_arbiter.py` vẫn là nơi duy nhất chọn manual/navigation, giới hạn vận
+  tốc và publish `/cmd_vel` tới ESP32.
+- Dùng `/map` của `slam_toolbox`, pose từ TF và dữ liệu `/scan`, `/odom` hiện có.
+- Có thể quay lại Nav2 bằng launch argument trong thời gian kiểm thử; Nav2 và
+  custom navigation không được chạy đồng thời.
+
+## 2. Ngoài phạm vi
+
+Giai đoạn này không thực hiện:
+
+- Sửa code trong `/home/pi/quangnv/bk/amr`.
+- Dùng Gazebo Transport hoặc copy `src/transport.py` từ repository tham khảo.
+- Thay đổi firmware ESP32, micro-ROS Agent hoặc topic `/cmd_vel`.
+- Thay đổi giao thức giữa browser và rosbridge.
+- Thay `slam_toolbox`, EKF hoặc cây TF hiện tại.
+- Xóa `nav2.yaml` trước khi custom backend vượt qua kiểm thử thực tế.
+
+## 3. Kiến trúc mục tiêu
+
+```text
+Browser
+   │
+   ├── /web/goal_pose
+   ├── /web/cancel_navigation
+   └── /web/control_mode
+   │
+   ▼
+web_bridge.py
+   │  nav2_msgs/action/NavigateToPose
+   ▼
+/navigate_to_pose
+   │
+   ▼
+custom_navigation_node.py
+   ├── Global planner: Dijkstra cost-to-go
+   ├── Local planner: DWA-lite
+   ├── subscribe /map, /scan, /odom
+   ├── lookup TF map -> base_footprint
+   ├── publish /plan
+   └── publish /cmd_vel_nav
+                    │
+                    ▼
+             cmd_vel_arbiter.py
+                    │
+                    ▼
+                 /cmd_vel
+                    │
+                    ▼
+             micro-ROS / ESP32
+```
+
+Custom node sử dụng cùng action type `nav2_msgs/action/NavigateToPose`. Đây chỉ
+là contract ROS giữa `web_bridge.py` và backend; nó không yêu cầu chạy planner,
+controller, behavior tree hoặc lifecycle manager của Nav2.
+
+## 4. File dự kiến thêm và sửa
+
+### 4.1. File mới
+
+```text
+ros/src/bringup/scripts/custom_navigation_node.py
+ros/src/bringup/scripts/custom_navigation/__init__.py
+ros/src/bringup/scripts/custom_navigation/config.py
+ros/src/bringup/scripts/custom_navigation/types.py
+ros/src/bringup/scripts/custom_navigation/helpers.py
+ros/src/bringup/scripts/custom_navigation/global_planner.py
+ros/src/bringup/scripts/custom_navigation/local_planner.py
+ros/src/bringup/scripts/custom_navigation/navigator.py
+ros/src/bringup/scripts/custom_navigation/ros_adapter.py
+ros/src/bringup/config/custom_navigation.yaml
+ros/src/bringup/test/test_custom_navigation_map.py
+ros/src/bringup/test/test_custom_navigation_action.py
+ros/src/bringup/test/test_custom_navigation_safety.py
+```
+
+Vai trò:
+
+- `custom_navigation_node.py`: entrypoint ROS 2, tạo node và executor.
+- `config.py`: cấu hình riêng cho robot thật; không giữ thông số Gazebo mặc định.
+- `types.py`: các kiểu `Point2D`, `Pose2D`, `Velocity`, trạng thái và kết quả
+  planner.
+- `helpers.py`: phép biến đổi hình học, chuẩn hóa góc và xử lý path.
+- `global_planner.py`: occupancy grid, inflation, costmap và Dijkstra.
+- `local_planner.py`: DWA-lite và kiểm tra trajectory.
+- `navigator.py`: state machine và control loop.
+- `ros_adapter.py`: chuyển ROS message/TF thành input planner, triển khai action
+  server và publish ROS output.
+- `custom_navigation.yaml`: toàn bộ tham số có thể tune mà không sửa code.
+- Các test: conversion map, lifecycle của action và các điều kiện dừng an toàn.
+
+### 4.2. File hiện tại cần sửa
+
+| File | Thay đổi |
+|---|---|
+| `ros/src/bringup/launch/web.launch.py` | Thêm launch argument `navigation_backend`; chạy custom node khi giá trị là `custom`, chỉ chạy các node Nav2/lifecycle khi giá trị là `nav2` |
+| `ros/src/bringup/CMakeLists.txt` | Cài executable, Python package và config mới |
+| `ros/src/bringup/package.xml` | Khai báo Python/NumPy và các ROS dependency trực tiếp của custom node |
+| `build.sh` | Kiểm tra executable, module và config custom đã được cài đúng |
+| `README.md` | Cập nhật topology và lệnh chạy backend mặc định sau khi nghiệm thu |
+| `docs/web_topics.md` | Đổi các mô tả phụ thuộc Nav2 thành navigation backend và ghi rõ `/plan` do custom node publish |
+
+### 4.3. File giữ nguyên hành vi
+
+- `ros/src/bringup/scripts/web_bridge.py` tiếp tục gửi
+  `NavigateToPose.Goal`, nhận feedback và xử lý action result.
+- `ros/src/bringup/scripts/cmd_vel_arbiter.py` tiếp tục nhận
+  `/cmd_vel_nav`, áp giới hạn và timeout rồi mới publish `/cmd_vel`.
+- `ros/src/bringup/config/slam.yaml` tiếp tục cung cấp map và TF.
+- `web/index.html` không đổi topic hoặc schema message.
+- `ros/src/bringup/config/nav2.yaml` được giữ lại để rollback nhưng không được
+  custom backend sử dụng.
+
+## 5. Phạm vi code được copy
+
+Copy logic từ repository tham khảo theo ánh xạ sau:
+
+| Nguồn chỉ đọc | Đích trong repository hiện tại |
+|---|---|
+| `src/navigation/custom/helpers.py` | `scripts/custom_navigation/helpers.py` |
+| `src/navigation/custom/global_planner.py` | `scripts/custom_navigation/global_planner.py` |
+| `src/navigation/custom/local_planner.py` | `scripts/custom_navigation/local_planner.py` |
+| `src/navigation/custom/navigator.py` | `scripts/custom_navigation/navigator.py` |
+| `src/navigation/types.py` | `scripts/custom_navigation/types.py` |
+| Phần `NavigationConfig` trong `src/config.py` | `scripts/custom_navigation/config.py` |
+
+Không copy:
+
+- `src/transport.py`, vì file này dùng Gazebo Transport.
+- `src/server.py`, FastAPI adapter và HTTP gateway.
+- `src/navigation/factory.py` và `src/navigation/nav2`.
+- Static map của simulator trong `src/sim/maps`.
+
+Sau khi copy, import phải đổi sang relative import trong package
+`custom_navigation`. Không thêm đường dẫn của repository `bk` vào `PYTHONPATH`
+và không tạo symlink tới repository đó.
+
+## 6. ROS input adapter
+
+### 6.1. Map
+
+Custom node subscribe:
+
+```text
+/map  nav_msgs/msg/OccupancyGrid
+```
+
+QoS phải tương thích publisher của `slam_toolbox`: reliable, transient local,
+depth 1.
+
+Chuyển đổi map:
+
+- `data >= occupied_threshold`: occupied.
+- `data == -1`: unknown và được coi là blocked.
+- Các cell còn lại: free.
+- Dùng `info.resolution` và `info.origin` để chuyển world/grid.
+- Không hard-code kích thước hoặc resolution của map.
+- Inflation dùng `robot_radius_m + safety_margin_m`.
+- Validate width, height, data length, resolution và origin trước khi nhận map.
+
+Planner chỉ được nhận goal nằm trong vùng đã biết và không bị inflation. Nếu
+chưa có map, action goal bị reject với log rõ ràng.
+
+Map mới nhất được lưu theo revision. Mỗi goal tạo global planning snapshot từ
+revision mới nhất. Nội dung map mới nhận khi robot đang di chuyển không thay
+trực tiếp grid dưới control thread; LiDAR chịu trách nhiệm tránh vật cản tức
+thời. Nếu metadata map thay đổi đáng kể trong mission, ví dụ
+origin/resolution/dimensions đổi do loop closure hoặc map growth, adapter tạo
+planner snapshot mới, lập lại đường tới cùng goal rồi chuyển sang planner mới.
+Nếu map thay đổi tiếp trong lúc replan, snapshot đang cũ sẽ bị bỏ qua và retry
+ở vòng control sau; goal chỉ bị hủy khi người dùng cancel hoặc navigation thực
+sự gặp lỗi.
+
+### 6.2. Pose và velocity
+
+Pose điều khiển phải nằm trong frame `map`:
+
+```text
+map -> base_footprint
+```
+
+Custom node lookup TF ở timestamp phù hợp, không lấy pose từ tọa độ odom rồi
+coi trực tiếp là map pose. `/odom` cung cấp measured linear/angular velocity.
+
+Một control cycle chỉ hợp lệ khi:
+
+- Có TF `map -> base_footprint`.
+- `/odom` và `/scan` đã được nhận.
+- Tuổi dữ liệu nhỏ hơn timeout cấu hình.
+- Tất cả giá trị dùng cho planner là finite.
+
+Nếu dữ liệu hết hạn trong lúc chạy, node publish zero ngay và kết thúc action ở
+trạng thái aborted.
+
+### 6.3. LiDAR
+
+Custom node subscribe:
+
+```text
+/scan  sensor_msgs/msg/LaserScan
+```
+
+Scan được chuyển thành obstacle points trong frame `base_footprint` bằng TF tại
+timestamp của scan. Không hard-code số ray bằng `360`, vì LiDAR thật có thể có
+số sample khác simulator. Quy tắc dữ liệu:
+
+- Bỏ NaN và range ngoài `[range_min, range_max]`.
+- `+inf` nghĩa là không có obstacle trên ray đó.
+- Không clamp invalid range thành obstacle giả ở `range_min`.
+- Drop scan nếu không có TF đúng timestamp.
+- Tăng sequence chỉ khi một scan hợp lệ được nhận.
+
+## 7. ROS output và action contract
+
+### 7.1. Velocity
+
+Custom node chỉ publish:
+
+```text
+/cmd_vel_nav  geometry_msgs/msg/Twist
+```
+
+Không publish `/cmd_vel`. Vận tốc phải bị giới hạn ở cả custom config và
+`cmd_vel_arbiter.py`. Baseline không được vượt:
+
+```text
+|linear.x|  <= 0.22 m/s
+|angular.z| <= 0.55 rad/s
+```
+
+Node lặp command ở `20 Hz` để không vượt timeout `0.60 s` của arbiter. Zero
+velocity phải được publish nhiều lần khi cancel, abort, shutdown hoặc exception.
+
+### 7.2. Global path
+
+Mỗi plan hợp lệ được publish lên:
+
+```text
+/plan  nav_msgs/msg/Path
+```
+
+Path dùng frame `map`, timestamp hiện tại và là path đã resample mà local
+planner thực sự theo. Publish empty path khi cancel, failure hoặc goal hoàn tất
+để UI không giữ path cũ.
+
+### 7.3. NavigateToPose action
+
+Custom node cung cấp:
+
+```text
+/navigate_to_pose  nav2_msgs/action/NavigateToPose
+```
+
+Luồng action:
+
+1. Validate frame goal là `map`, tọa độ/quaternion finite và quaternion hợp lệ.
+2. Kiểm tra map, TF, odometry và scan đã sẵn sàng.
+3. Chuyển goal thành `Point2D(x, y, yaw)`.
+4. Chạy global plan; reject/abort nếu goal ngoài map, unknown, occupied hoặc
+   không có path.
+5. Start navigator và trả feedback định kỳ.
+6. Điền tối thiểu `feedback.distance_remaining`; đây là field
+   `web_bridge.py` đang dùng.
+7. Trả succeeded khi đạt cả position và yaw tolerance trong đủ số cycle ổn
+   định.
+8. Trả canceled sau khi nhận cancel và đã publish zero.
+9. Trả aborted khi blocked, sensor stale, TF lỗi hoặc planner/controller lỗi.
+
+Chỉ một goal được active tại một thời điểm. Cancel callback phải nhanh và không
+chờ Dijkstra/DWA hoàn tất mới dừng robot; state revision của navigator dùng để
+bỏ kết quả tính toán cũ.
+
+## 8. State mapping
+
+State nội bộ và action result được ánh xạ như sau:
+
+| Custom state | Action/Web behavior |
+|---|---|
+| `IDLE` | Chờ goal |
+| `PLANNING` | Goal đang được kiểm tra/lập path |
+| `READY` | Plan hợp lệ, chuẩn bị control loop |
+| `NAVIGATING` | Action active, `web_bridge.py` publish `MOVING` |
+| `SUCCEEDED` | Action succeed, Web UI nhận `SUCCEEDED` |
+| `CANCELLED` | Action canceled, Web UI nhận `CANCELED` |
+| `BLOCKED` | Action aborted, Web UI nhận `FAILED` |
+| `ERROR` | Action aborted, Web UI nhận `FAILED` hoặc `ERROR` qua log/status |
+
+`web_bridge.py` hiện là nơi publish `/web/nav_status`; custom node không publish
+cạnh tranh vào topic đó.
+
+## 9. Cấu hình ban đầu
+
+`custom_navigation.yaml` phải dùng thông số robot hiện tại làm baseline, không
+dùng nguyên giá trị của simulator:
+
+```yaml
+custom_navigation:
+  ros__parameters:
+    map_frame: map
+    odom_frame: odom
+    base_frame: base_footprint
+    scan_topic: /scan
+    odom_topic: /odom
+    map_topic: /map
+    cmd_vel_topic: /cmd_vel_nav
+    plan_topic: /plan
+
+    robot_radius_m: 0.22
+    safety_margin_m: 0.05
+    occupied_threshold: 65
+
+    max_linear_velocity_mps: 0.22
+    max_angular_velocity_rps: 0.55
+    linear_acceleration_mps2: 0.50
+    angular_acceleration_rps2: 1.20
+
+    goal_tolerance_m: 0.12
+    goal_yaw_tolerance_rad: 0.20
+    control_hz: 5.0
+    command_publish_hz: 20.0
+    sensor_timeout_seconds: 0.60
+    no_progress_timeout_seconds: 12.0
+```
+
+Các trọng số DWA, lookahead, prediction horizon, sample count và clearance được
+copy làm điểm bắt đầu nhưng phải benchmark trên Raspberry Pi 5 và tune với vận
+tốc thấp của robot thật.
+
+## 10. Launch và chuyển backend
+
+Thêm launch argument:
+
+```bash
+ros2 launch bringup web.launch.py navigation_backend:=custom
+ros2 launch bringup web.launch.py navigation_backend:=nav2
+```
+
+Quy tắc:
+
+- `custom`: chạy `custom_navigation_node.py`; không chạy controller, smoother,
+  planner, behavior, BT navigator, waypoint follower, velocity smoother và
+  lifecycle manager của Nav2.
+- `nav2`: giữ hành vi launch hiện tại; không chạy custom node.
+- Mọi giá trị khác làm launch fail sớm với thông báo rõ ràng.
+- Trong giai đoạn tích hợp, default giữ là `nav2` cho tới khi test bench pass.
+- Sau khi test bench và robot pass, đổi default sang `custom`.
+
+Việc giữ lựa chọn `nav2` là cơ chế rollback trong giai đoạn nghiệm thu, không
+phải chạy hai backend song song.
+
+## 11. An toàn và concurrency
+
+Các invariant bắt buộc:
+
+- Chỉ `cmd_vel_arbiter.py` publish lệnh cuối cùng lên `/cmd_vel`.
+- Không có command non-zero khi action không active.
+- Cancel, emergency stop, sensor timeout, TF failure, exception và shutdown đều
+  dẫn tới zero velocity.
+- Không giữ lock của mission trong lúc chạy Dijkstra hoặc chấm điểm DWA.
+- Kết quả planner cũ không được commit sau cancel/new goal; kiểm tra revision
+  trước khi publish command.
+- Goal mới không được dùng map/pose/scan chưa sẵn sàng.
+- Unknown map cell không được coi là free.
+- Local planner kiểm tra cả inflated static map và obstacle points từ scan.
+- Log lỗi được throttle để tránh làm nghẽn Pi khi TF hoặc sensor mất liên tục.
+
+Emergency stop vẫn do `web_bridge.py` hủy action và
+`cmd_vel_arbiter.py` latch output zero. Custom node phải xử lý cancel độc lập để
+không phụ thuộc riêng vào arbiter cho trạng thái action.
+
+## 12. Kế hoạch triển khai
+
+### Giai đoạn 1: Vendor và unit test thuật toán
+
+1. Copy các module được liệt kê ở mục 5.
+2. Đổi import sang package local và bỏ dependency Gazebo/FastAPI.
+3. Tạo config theo giới hạn robot hiện tại.
+4. Port unit tests cho occupancy grid, Dijkstra, DWA và navigator state machine.
+5. Xác nhận toàn bộ test chạy mà không cần ROS graph hoặc phần cứng.
+
+Điều kiện hoàn tất:
+
+- Không có import từ `/home/pi/quangnv/bk/amr`.
+- Không có import `gz.*`.
+- Planner test pass với map nhỏ, goal blocked, no-path và obstacle động.
+
+### Giai đoạn 2: ROS adapter và action server
+
+1. Triển khai subscriber `/map`, `/scan`, `/odom` và TF listener.
+2. Triển khai publisher `/cmd_vel_nav` và `/plan`.
+3. Triển khai `/navigate_to_pose` action server.
+4. Thêm cancel, shutdown và stale-sensor handling.
+5. Test bằng ROS message giả, không nối motor.
+
+Điều kiện hoàn tất:
+
+- Action bị reject/abort đúng khi thiếu map/TF/sensor.
+- Cancel tạo zero velocity trong tối đa một command period.
+- Không publish non-zero khi action kết thúc.
+- `/plan` có frame `map` và được clear khi mission kết thúc.
+
+### Giai đoạn 3: Tích hợp launch
+
+1. Thêm `navigation_backend` và condition vào `web.launch.py`.
+2. Cập nhật install/dependency/build checks.
+3. Build workspace trong container hiện tại.
+4. Kiểm tra chỉ có một action server `/navigate_to_pose`.
+
+Điều kiện hoàn tất:
+
+- `navigation_backend:=nav2` vẫn khởi động như trước.
+- `navigation_backend:=custom` không chạy Nav2 process nào.
+- `ros2 action list` có đúng một `/navigate_to_pose`.
+- `/cmd_vel_nav` chỉ có một publisher navigation.
+
+### Giai đoạn 4: Bench test không tải
+
+1. Nâng bánh xe hoặc ngắt motor power.
+2. Khởi động custom backend và kiểm tra map/TF/sensor readiness.
+3. Gửi goal, quan sát `/plan`, action feedback và `/cmd_vel_nav`.
+4. Test Cancel, đóng browser, mất rosbridge, mất `/scan`, mất `/odom` và dừng
+   node bằng `Ctrl+C`.
+
+Điều kiện hoàn tất:
+
+- Mọi đường lỗi đều đưa command về zero.
+- Vận tốc không vượt giới hạn arbiter.
+- CPU/memory ổn định; control heartbeat không trễ quá timeout arbiter.
+
+### Giai đoạn 5: Robot test tốc độ thấp
+
+Thứ tự case:
+
+1. Goal thẳng, không obstacle.
+2. Goal yêu cầu quay tại chỗ.
+3. Goal có static obstacle và cần đường vòng.
+4. Obstacle tạm thời xuất hiện trên path.
+5. Cancel khi đang chạy thẳng và khi đang quay.
+6. Goal blocked, goal ngoài map và goal trong unknown area.
+7. Sensor/TF interruption.
+8. Nhiều goal liên tiếp sau success/cancel/failure.
+
+Chỉ tăng tốc hoặc tune DWA sau khi các case dừng an toàn đã pass.
+
+## 13. Lệnh kiểm tra dự kiến
+
+Build:
+
+```bash
+./build.sh
+```
+
+Chạy custom backend:
+
+```bash
+./shell.sh
+ros2 launch bringup web.launch.py navigation_backend:=custom
+```
+
+Kiểm tra graph:
+
+```bash
+ros2 action info /navigate_to_pose
+ros2 topic info /cmd_vel_nav -v
+ros2 topic info /cmd_vel -v
+ros2 topic echo /plan --once
+ros2 topic hz /scan
+ros2 topic hz /odom
+ros2 run tf2_ros tf2_echo map base_footprint
+```
+
+Các kiểm tra bổ sung phải xác nhận không có process Nav2 khi backend là
+`custom` và không có custom process khi backend là `nav2`.
+
+## 14. Tiêu chí nghiệm thu
+
+Custom navigation chỉ được đặt làm backend mặc định khi đạt tất cả điều kiện:
+
+- Build sạch trong Docker image hiện tại.
+- Unit test thuật toán và ROS adapter pass.
+- Web UI gửi goal, hiển thị path, nhận feedback, cancel và trạng thái kết thúc
+  mà không phải sửa giao thức frontend.
+- Robot đi tới goal trong tolerance cấu hình ở các case cơ bản.
+- Không va vào static obstacle trong test map.
+- Obstacle LiDAR làm robot dừng hoặc chọn trajectory an toàn.
+- Cancel/emergency/sensor timeout/TF failure/shutdown đều tạo zero command.
+- Không có hai publisher navigation cạnh tranh.
+- CPU trên Raspberry Pi 5 đủ để giữ control loop và command heartbeat ổn định.
+- Backend Nav2 vẫn có thể chọn lại để rollback trong thời gian nghiệm thu.
+
+Sau khi đạt các tiêu chí trên:
+
+1. Đổi default `navigation_backend` từ `nav2` sang `custom`.
+2. Cập nhật README và tài liệu topic.
+3. Chạy soak test tối thiểu 30 phút với nhiều goal/cancel liên tiếp.
+4. Chỉ cân nhắc xóa dependency/runtime Nav2 ở một thay đổi riêng sau khi hết
+   thời gian rollback.
+
+## 15. Rủi ro chính
+
+| Rủi ro | Cách giảm thiểu |
+|---|---|
+| Thuật toán nguồn được tune cho simulator | Dùng config robot thật, giới hạn vận tốc thấp và tune theo từng test case |
+| LiDAR thật không có đúng 360 ray | Adapter chấp nhận kích thước scan động và dùng metadata ROS |
+| Static map nguồn không tương thích SLAM map | Tạo grid trực tiếp từ `/map`; không copy JSON simulator |
+| Dijkstra/inflation tốn CPU khi map lớn | Snapshot map theo goal, benchmark thời gian plan, giới hạn tần suất rebuild và tối ưu distance transform nếu cần |
+| Map đổi trong khi mission đang chạy | Dùng map revision, không mutate grid trong control thread và replan an toàn tới cùng goal khi metadata đổi |
+| TF hoặc sensor mất tạm thời | Freshness timeout, abort action và publish zero |
+| Custom node và Nav2 cùng chạy | Launch condition loại trừ lẫn nhau và graph check trong test |
+| Action callback bị block bởi planner | Chạy tính toán ngoài ROS callback/mission lock và dùng revision để hủy kết quả cũ |

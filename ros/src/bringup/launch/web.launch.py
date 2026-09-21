@@ -7,6 +7,7 @@ from launch import LaunchDescription
 from launch.actions import (
     DeclareLaunchArgument,
     IncludeLaunchDescription,
+    OpaqueFunction,
     TimerAction,
 )
 from launch.conditions import IfCondition
@@ -14,7 +15,7 @@ from launch.launch_description_sources import (
     FrontendLaunchDescriptionSource,
     PythonLaunchDescriptionSource,
 )
-from launch.substitutions import LaunchConfiguration
+from launch.substitutions import LaunchConfiguration, PythonExpression
 from launch_ros.actions import Node
 
 
@@ -24,6 +25,14 @@ def generate_launch_description():
         bringup_share, 'config', 'nav2.yaml')
     slam_params = os.path.join(
         bringup_share, 'config', 'slam.yaml')
+    custom_navigation_params = os.path.join(
+        bringup_share, 'config', 'custom_navigation.yaml')
+
+    navigation_backend = LaunchConfiguration('navigation_backend')
+    custom_condition = IfCondition(PythonExpression([
+        "'", navigation_backend, "' == \"custom\""]))
+    nav2_condition = IfCondition(PythonExpression([
+        "'", navigation_backend, "' == \"nav2\""]))
 
     nav2_common = {
         'output': 'screen',
@@ -40,10 +49,22 @@ def generate_launch_description():
         'velocity_smoother',
     ]
 
+    def validate_backend(context):
+        backend = navigation_backend.perform(context).strip().lower()
+        if backend not in ('custom', 'nav2'):
+            raise RuntimeError(
+                "navigation_backend must be either 'custom' or 'nav2', "
+                f"got {backend!r}")
+        return []
+
     return LaunchDescription([
         DeclareLaunchArgument(
             'use_camera', default_value='true',
             description='Start USB camera'),
+        DeclareLaunchArgument(
+            'navigation_backend', default_value='nav2',
+            description='Navigation backend: nav2 or custom'),
+        OpaqueFunction(function=validate_backend),
         IncludeLaunchDescription(
             PythonLaunchDescriptionSource(os.path.join(
                 get_package_share_directory('imu_complementary_filter'),
@@ -105,6 +126,7 @@ def generate_launch_description():
             package='nav2_controller',
             executable='controller_server',
             remappings=tf_remaps + [('cmd_vel', '/cmd_vel_nav_raw')],
+            condition=nav2_condition,
             **nav2_common,
         ),
         Node(
@@ -112,6 +134,7 @@ def generate_launch_description():
             executable='smoother_server',
             name='smoother_server',
             remappings=tf_remaps,
+            condition=nav2_condition,
             **nav2_common,
         ),
         Node(
@@ -119,6 +142,7 @@ def generate_launch_description():
             executable='planner_server',
             name='planner_server',
             remappings=tf_remaps,
+            condition=nav2_condition,
             **nav2_common,
         ),
         Node(
@@ -126,6 +150,7 @@ def generate_launch_description():
             executable='behavior_server',
             name='behavior_server',
             remappings=tf_remaps + [('cmd_vel', '/cmd_vel_nav_raw')],
+            condition=nav2_condition,
             **nav2_common,
         ),
         Node(
@@ -133,6 +158,7 @@ def generate_launch_description():
             executable='bt_navigator',
             name='bt_navigator',
             remappings=tf_remaps,
+            condition=nav2_condition,
             **nav2_common,
         ),
         Node(
@@ -140,6 +166,7 @@ def generate_launch_description():
             executable='waypoint_follower',
             name='waypoint_follower',
             remappings=tf_remaps,
+            condition=nav2_condition,
             **nav2_common,
         ),
         Node(
@@ -150,7 +177,16 @@ def generate_launch_description():
                 ('cmd_vel', '/cmd_vel_nav_raw'),
                 ('cmd_vel_smoothed', '/cmd_vel_nav'),
             ],
+            condition=nav2_condition,
             **nav2_common,
+        ),
+        Node(
+            package='bringup',
+            executable='custom_navigation_node.py',
+            name='custom_navigation',
+            output='screen',
+            parameters=[custom_navigation_params],
+            condition=custom_condition,
         ),
         # Delay lifecycle transitions while Nav2 and SLAM settle on the Pi.
         TimerAction(
@@ -165,6 +201,7 @@ def generate_launch_description():
                     {'autostart': True},
                     {'node_names': lifecycle_nodes},
                 ],
+                condition=nav2_condition,
             )],
         ),
         IncludeLaunchDescription(
