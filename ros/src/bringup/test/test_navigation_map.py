@@ -2,11 +2,11 @@ import unittest
 
 from nav_msgs.msg import OccupancyGrid
 
-from custom_navigation.config import DEFAULT_CONFIG
-from custom_navigation.ros_adapter import occupancy_grid_from_ros
+from navigation.config import DEFAULT_CONFIG
+from navigation.ros_adapter import occupancy_grid_from_ros
 
 
-class CustomNavigationMapTest(unittest.TestCase):
+class NavigationMapTest(unittest.TestCase):
     def make_map(self, values, width=3, height=2):
         message = OccupancyGrid()
         message.header.frame_id = "map"

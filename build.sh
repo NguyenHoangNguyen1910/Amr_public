@@ -57,9 +57,9 @@ test -f "$WORKSPACE/install/bringup/share/bringup/launch/web.launch.py"
 test -x "$WORKSPACE/install/bringup/lib/bringup/camera_mjpeg.py"
 test -x "$WORKSPACE/install/bringup/lib/bringup/cmd_vel_arbiter.py"
 test -x "$WORKSPACE/install/bringup/lib/bringup/web_bridge.py"
-test -x "$WORKSPACE/install/bringup/lib/bringup/custom_navigation_node.py"
-test -f "$WORKSPACE/install/bringup/share/bringup/config/custom_navigation.yaml"
-test -f "$WORKSPACE/install/bringup/local/lib/python3.10/dist-packages/custom_navigation/ros_adapter.py" || \
-  test -f "$WORKSPACE/install/bringup/local/lib/python3.12/dist-packages/custom_navigation/ros_adapter.py"
+test -x "$WORKSPACE/install/bringup/lib/bringup/navigation_node.py"
+test -f "$WORKSPACE/install/bringup/share/bringup/config/navigation.yaml"
+test -f "$WORKSPACE/install/bringup/local/lib/python3.10/dist-packages/navigation/ros_adapter.py" || \
+  test -f "$WORKSPACE/install/bringup/local/lib/python3.12/dist-packages/navigation/ros_adapter.py"
 
 echo "Build completed and required runtime files were found."

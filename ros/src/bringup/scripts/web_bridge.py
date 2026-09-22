@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 
-"""Bridge robot state, laser data, and custom navigation to the web app."""
+"""Bridge robot state, laser data, and navigation to the web app."""
 
 import json
 import math
@@ -29,7 +29,7 @@ from bringup.msg import ScanPoints
 
 
 class WebBridge(Node):
-    """Expose robot pose, laser points, and custom navigation to the web app."""
+    """Expose robot pose, laser points, and navigation to the web app."""
 
     def __init__(self):
         super().__init__('web_bridge')
@@ -276,7 +276,7 @@ class WebBridge(Node):
         goal = NavigateToPose.Goal()
         goal.pose = message
         self.active_goal_publisher.publish(message)
-        self.publish_status('PLANNING', 'sending goal to custom navigation')
+        self.publish_status('PLANNING', 'sending goal to navigation')
         future = self.action_client.send_goal_async(
             goal,
             feedback_callback=lambda feedback: self.feedback_callback(

@@ -4,11 +4,7 @@ import os
 
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
-from launch.actions import (
-    DeclareLaunchArgument,
-    IncludeLaunchDescription,
-    OpaqueFunction,
-)
+from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription
 from launch.conditions import IfCondition
 from launch.launch_description_sources import (
     FrontendLaunchDescriptionSource,
@@ -22,27 +18,15 @@ def generate_launch_description():
     bringup_share = get_package_share_directory('bringup')
     slam_params = os.path.join(
         bringup_share, 'config', 'slam.yaml')
-    custom_navigation_params = os.path.join(
-        bringup_share, 'config', 'custom_navigation.yaml')
-
-    navigation_backend = LaunchConfiguration('navigation_backend')
-
-    def validate_backend(context):
-        backend = navigation_backend.perform(context).strip().lower()
-        if backend != 'custom':
-            raise RuntimeError(
-                "navigation_backend must be 'custom'; "
-                f"got {backend!r}")
-        return []
+    navigation_params = os.path.join(
+        bringup_share, 'config', 'navigation.yaml')
+    camera_params = os.path.join(
+        get_package_share_directory('usb_cam'), 'config', 'params_1.yaml')
 
     return LaunchDescription([
         DeclareLaunchArgument(
             'use_camera', default_value='true',
             description='Start USB camera'),
-        DeclareLaunchArgument(
-            'navigation_backend', default_value='custom',
-            description='Navigation backend; only custom is supported'),
-        OpaqueFunction(function=validate_backend),
         IncludeLaunchDescription(
             PythonLaunchDescriptionSource(os.path.join(
                 get_package_share_directory('imu_complementary_filter'),
@@ -102,19 +86,27 @@ def generate_launch_description():
         ),
         Node(
             package='bringup',
-            executable='custom_navigation_node.py',
-            name='custom_navigation',
+            executable='navigation_node.py',
+            name='navigation',
             output='screen',
-            parameters=[custom_navigation_params],
+            parameters=[navigation_params],
         ),
         IncludeLaunchDescription(
             FrontendLaunchDescriptionSource(os.path.join(
                 get_package_share_directory('rosbridge_server'),
                 'launch', 'rosbridge_websocket_launch.xml'))),
-        IncludeLaunchDescription(
-            PythonLaunchDescriptionSource(os.path.join(
-                get_package_share_directory('usb_cam'),
-                'launch', 'camera.launch.py')),
+        Node(
+            package='usb_cam',
+            executable='usb_cam_node_exe',
+            name='camera1',
+            parameters=[
+                camera_params,
+                {'framerate': 8.0, 'image_raw.jpeg_quality': 45},
+            ],
+            remappings=[
+                ('image_raw/compressed', 'usb_cam/image_raw/compressed'),
+            ],
+            output='screen',
             condition=IfCondition(LaunchConfiguration('use_camera')),
         ),
         Node(

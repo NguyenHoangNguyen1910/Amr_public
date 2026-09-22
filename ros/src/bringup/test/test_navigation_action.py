@@ -3,10 +3,10 @@ import unittest
 import rclpy
 from bringup.action import NavigateToPose
 
-from custom_navigation.ros_adapter import CustomNavigationNode
+from navigation.ros_adapter import NavigationNode
 
 
-class CustomNavigationActionTest(unittest.TestCase):
+class NavigationActionTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         rclpy.init()
@@ -17,9 +17,9 @@ class CustomNavigationActionTest(unittest.TestCase):
             rclpy.shutdown()
 
     def test_node_exposes_existing_navigate_to_pose_contract(self):
-        node = CustomNavigationNode()
+        node = NavigationNode()
         try:
-            self.assertEqual(node.get_name(), "custom_navigation")
+            self.assertEqual(node.get_name(), "navigation")
             self.assertEqual(
                 NavigateToPose.Goal.get_fields_and_field_types()["pose"],
                 "geometry_msgs/PoseStamped",

@@ -1,27 +1,19 @@
-"""Static occupancy, runtime costmap, and goal-directed global planning."""
+"""Occupancy grid, dynamic costmap, and global path planning."""
 
 from __future__ import annotations
 
 import heapq
-import json
 import math
 from collections.abc import Iterator, Sequence
 from enum import Enum
-from pathlib import Path
 
 import numpy as np
-
-try:
-    from scipy.ndimage import distance_transform_edt
-except ImportError:  # pragma: no cover - only used in minimal non-ROS test envs.
-    distance_transform_edt = None
+from scipy.ndimage import distance_transform_edt
 
 from .config import NavigationConfig
-from .helpers import distance, lerp, path_length, resample_path
-from .types import GlobalPlan, Point2D
+from .types import GlobalPlan, Point2D, distance, lerp, resample_path
 
 Cell = tuple[int, int]
-
 _DIAGONAL = math.sqrt(2.0)
 _NEIGHBOURS = (
     (-1, 0, 1.0),
@@ -35,35 +27,7 @@ _NEIGHBOURS = (
 )
 
 
-# -- occupancy ----------------------------------------------------------------
-
-
-def _clearance_metres(occupied: np.ndarray, resolution_m: float) -> np.ndarray:
-    """Distance in metres from every cell centre to the nearest occupied cell."""
-
-    if not occupied.any():
-        return np.full(occupied.shape, math.inf)
-    if distance_transform_edt is not None:
-        # ``distance_transform_edt`` measures distance to the nearest zero.
-        # Free cells are true and occupied cells are zero in this input.
-        return distance_transform_edt(~occupied, sampling=resolution_m)
-    rows, columns = np.nonzero(occupied)
-    # Column offsets do not depend on the row, so square them once up front.
-    column_squared = (np.arange(occupied.shape[1])[:, None] - columns) ** 2
-    squared = np.empty(occupied.shape)
-    for row in range(occupied.shape[0]):
-        squared[row] = (column_squared + (rows - row) ** 2).min(axis=1)
-    return np.sqrt(squared) * resolution_m
-
-
 class OccupancyGrid:
-    """A world-aligned grid and the queries planners run against it.
-
-    ``raw`` is the obstacle geometry itself, ``clearance`` its distance
-    transform, and ``occupied`` the inflated grid the robot centre must stay
-    out of.
-    """
-
     def __init__(
         self,
         raw: np.ndarray,
@@ -79,9 +43,11 @@ class OccupancyGrid:
         self.resolution_m = resolution_m
         self.inflation_radius = inflation_radius_m
         self.height, self.width = raw.shape
-        self.clearance = _clearance_metres(raw, resolution_m)
-        # Sampling cell centres costs up to half a cell of accuracy; inflate by
-        # that much more so the footprint never clips geometry between samples.
+        self.clearance = (
+            distance_transform_edt(~raw, sampling=resolution_m)
+            if raw.any()
+            else np.full(raw.shape, math.inf)
+        )
         self.occupied = self.clearance <= inflation_radius_m + 0.5 * resolution_m
 
     def world_to_grid(self, point: Point2D) -> Cell:
@@ -102,14 +68,10 @@ class OccupancyGrid:
         return 0 <= row < self.height and 0 <= column < self.width
 
     def is_free(self, point: Point2D) -> bool:
-        """True where the robot centre may sit; outside the grid is never free."""
-
         cell = self.world_to_grid(point)
         return self.contains_cell(cell) and not bool(self.occupied[cell])
 
     def is_raw_free(self, point: Point2D) -> bool:
-        """True outside the obstacle itself, ignoring the inflation band."""
-
         cell = self.world_to_grid(point)
         return self.contains_cell(cell) and not bool(self.raw[cell])
 
@@ -125,46 +87,8 @@ class OccupancyGrid:
         return all(self.is_free(point) for point in self.line_samples(start, end))
 
 
-def load_static_map(path: Path, config: NavigationConfig) -> OccupancyGrid:
-    """Rasterise the world's circular obstacles into an inflated grid.
-
-    The map is a repository asset describing the SDF world, not a SLAM output.
-    ``test_amr_navigation_map`` is what holds it in step with the SDF and with
-    ``NavigationConfig``, so nothing is re-checked here at runtime.
-    """
-
-    payload = json.loads(path.read_text())
-    bounds = payload["bounds"]
-    resolution_m = float(payload["resolution_m"])
-    min_x, min_y = float(bounds["min_x"]), float(bounds["min_y"])
-    width = math.ceil((float(bounds["max_x"]) - min_x) / resolution_m)
-    height = math.ceil((float(bounds["max_y"]) - min_y) / resolution_m)
-
-    centre_x, centre_y = np.meshgrid(
-        min_x + (np.arange(width) + 0.5) * resolution_m,
-        min_y + (np.arange(height) + 0.5) * resolution_m,
-    )
-    raw = np.zeros((height, width), dtype=np.bool_)
-    for obstacle in payload["obstacles"]:
-        raw |= np.hypot(
-            centre_x - float(obstacle["x"]), centre_y - float(obstacle["y"])
-        ) <= float(obstacle["radius"])
-
-    return OccupancyGrid(
-        raw,
-        min_x=min_x,
-        min_y=min_y,
-        resolution_m=resolution_m,
-        inflation_radius_m=config.robot_radius_m + config.safety_margin_m,
-    )
-
-
 class CostMap:
-    """Static occupancy plus LiDAR-seen obstacles that expire on a TTL.
-
-    ``version`` increments whenever ``grid`` is replaced, which is how the
-    global planner knows its cost field is stale.
-    """
+    """Static occupancy plus temporary obstacles observed by LiDAR."""
 
     def __init__(self, static: OccupancyGrid, obstacle_ttl_seconds: float):
         self.static = static
@@ -175,8 +99,6 @@ class CostMap:
         self.version = 0
 
     def update_world_obstacles(self, points: Sequence[Point2D], now: float) -> None:
-        """Refresh TTLs for scan returns that known static geometry cannot explain."""
-
         for point in points:
             cell = self.static.world_to_grid(point)
             if self.static.contains_cell(cell) and not self.static.occupied[cell]:
@@ -191,21 +113,16 @@ class CostMap:
         if np.array_equal(dynamic, self._dynamic):
             return
         self._dynamic = dynamic
-        self.grid = (
-            OccupancyGrid(
+        self.grid = self.static
+        if dynamic.any():
+            self.grid = OccupancyGrid(
                 self.static.raw | dynamic,
                 min_x=self.static.min_x,
                 min_y=self.static.min_y,
                 resolution_m=self.static.resolution_m,
                 inflation_radius_m=self.static.inflation_radius,
             )
-            if dynamic.any()
-            else self.static
-        )
         self.version += 1
-
-    # Planners query the combined grid; only the LiDAR filter in the local
-    # planner asks the separate question of what the static map already knows.
 
     def is_free(self, point: Point2D) -> bool:
         return self.grid.is_free(point)
@@ -218,9 +135,6 @@ class CostMap:
 
     def static_is_free(self, point: Point2D) -> bool:
         return self.static.is_free(point)
-
-
-# -- global planning ----------------------------------------------------------
 
 
 class PlanningErrorCode(str, Enum):
@@ -237,12 +151,7 @@ class PlanningError(RuntimeError):
 
 
 class GlobalPlanner:
-    """Dijkstra cost-to-go field over the costmap for one world-frame goal.
-
-    A whole field rather than a single route: the local planner scores its
-    candidate arcs by how much cost-to-go each one removes, which needs the
-    value at arbitrary poses, not just along one path.
-    """
+    """Dijkstra cost-to-go field and path for one goal."""
 
     def __init__(self, cost_map: CostMap, goal: Point2D, config: NavigationConfig):
         self.cost_map = cost_map
@@ -257,57 +166,46 @@ class GlobalPlanner:
         self.refresh()
 
     def refresh(self) -> None:
-        """Rebuild the cost field when the costmap has changed underneath it."""
-
         if self.cost_map.grid.occupied[self.goal_cell]:
-            raise PlanningError(PlanningErrorCode.GOAL_BLOCKED, "goal is in an inflated obstacle")
+            raise PlanningError(
+                PlanningErrorCode.GOAL_BLOCKED, "goal is in an inflated obstacle"
+            )
         if self._version != self.cost_map.version:
-            self.costs, self.next_cell = self._dijkstra()
+            self._build_cost_field()
             self._version = self.cost_map.version
 
     def _neighbours(self, cell: Cell) -> Iterator[tuple[Cell, float]]:
-        """Free 8-connected neighbours with step cost; diagonals may not cut corners."""
-
         grid = self.cost_map.grid
         row, column = cell
-        for dr, dc, step in _NEIGHBOURS:
-            neighbour = (row + dr, column + dc)
+        for row_delta, column_delta, step in _NEIGHBOURS:
+            neighbour = (row + row_delta, column + column_delta)
             if not grid.contains_cell(neighbour) or grid.occupied[neighbour]:
                 continue
-            if dr and dc and (grid.occupied[row + dr, column] or grid.occupied[row, column + dc]):
+            if row_delta and column_delta and (
+                grid.occupied[row + row_delta, column]
+                or grid.occupied[row, column + column_delta]
+            ):
                 continue
             yield neighbour, step
 
-    def _dijkstra(self) -> tuple[np.ndarray, dict[Cell, Cell]]:
-        clearance = self.cost_map.grid.clearance
-        preferred = self.config.preferred_clearance_m
-        weight = self.config.clearance_cost_weight
-        costs = np.full(clearance.shape, math.inf)
-        next_cell: dict[Cell, Cell] = {}
-        costs[self.goal_cell] = 0.0
+    def _build_cost_field(self) -> None:
+        self.costs = np.full(self.cost_map.grid.raw.shape, math.inf)
+        self.next_cell = {}
+        self.costs[self.goal_cell] = 0.0
         queue = [(0.0, self.goal_cell)]
+
         while queue:
             cost, cell = heapq.heappop(queue)
-            if cost > costs[cell]:
+            if cost > self.costs[cell]:
                 continue
             for neighbour, step in self._neighbours(cell):
-                # Inflation stays a hard constraint; this only makes the field
-                # prefer the middle of a corridor over hugging its edge.
-                deficit = max(0.0, (preferred - clearance[neighbour]) / preferred)
-                candidate = cost + step * (1.0 + weight * deficit * deficit)
-                if candidate + 1e-12 < costs[neighbour]:
-                    costs[neighbour] = candidate
-                    next_cell[neighbour] = cell
+                candidate = cost + step
+                if candidate + 1e-12 < self.costs[neighbour]:
+                    self.costs[neighbour] = candidate
+                    self.next_cell[neighbour] = cell
                     heapq.heappush(queue, (candidate, neighbour))
-        return costs, next_cell
 
     def _reachable_cell(self, point: Point2D) -> Cell:
-        """Nearest cell with a finite cost, for a start that drifted into inflation.
-
-        Only the start is ever snapped, only within the safety margin, and only
-        across raw-free ground.  A blocked goal is rejected, never moved.
-        """
-
         grid = self.cost_map.grid
         cell = grid.world_to_grid(point)
         if not grid.contains_cell(cell):
@@ -316,7 +214,7 @@ class GlobalPlanner:
             return cell
 
         reach = math.ceil(self.config.safety_margin_m / grid.resolution_m) + 1
-        candidates = [
+        candidates = (
             (row, column)
             for row in range(cell[0] - reach, cell[0] + reach + 1)
             for column in range(cell[1] - reach, cell[1] + reach + 1)
@@ -326,23 +224,26 @@ class GlobalPlanner:
                 grid.is_raw_free(sample)
                 for sample in grid.line_samples(point, grid.grid_to_world((row, column)))
             )
-        ]
-        if not candidates:
-            code = PlanningErrorCode.START_BLOCKED if grid.occupied[cell] else PlanningErrorCode.NO_PATH
-            raise PlanningError(code, f"no collision-free path to goal ({code})")
-        return min(
-            candidates,
-            key=lambda item: (math.hypot(item[0] - cell[0], item[1] - cell[1]), item),
         )
+        try:
+            return min(candidates, key=lambda item: (math.dist(item, cell), item))
+        except ValueError:
+            code = (
+                PlanningErrorCode.START_BLOCKED
+                if grid.occupied[cell]
+                else PlanningErrorCode.NO_PATH
+            )
+            raise PlanningError(code, f"no collision-free path to goal ({code})") from None
 
     def cost_to_go(self, point: Point2D) -> float:
-        grid = self.cost_map.grid
-        cell = grid.world_to_grid(point)
-        return float(self.costs[cell]) if grid.contains_cell(cell) else math.inf
+        cell = self.cost_map.grid.world_to_grid(point)
+        return (
+            float(self.costs[cell])
+            if self.cost_map.grid.contains_cell(cell)
+            else math.inf
+        )
 
     def progress_m(self, start: Point2D, end: Point2D) -> float:
-        """Cost-to-go removed by moving start->end; +/-inf when an end is off the field."""
-
         before, after = self.cost_to_go(start), self.cost_to_go(end)
         if math.isfinite(before) and math.isfinite(after):
             return (before - after) * self.cost_map.grid.resolution_m
@@ -354,37 +255,26 @@ class GlobalPlanner:
         cells = [first]
         while cells[-1] != self.goal_cell:
             cells.append(self.next_cell[cells[-1]])
+
         raw = [grid.grid_to_world(cell) for cell in cells]
-        # Start and goal are real coordinates, not cell centres.  A snapped
-        # start keeps its cell as well, so the step back out of inflation
-        # stays in the path instead of being smoothed away.
         if first == grid.world_to_grid(start):
             raw[0] = start
         else:
             raw.insert(0, start)
         raw[-1] = self.goal
         path = resample_path(self._smooth(raw), self.config.waypoint_spacing_m)
-        return GlobalPlan(tuple(raw), path, path_length(path))
+        return GlobalPlan(path)
 
     def _smooth(self, path: Sequence[Point2D]) -> tuple[Point2D, ...]:
-        """Greedy line-of-sight shortcuts that never reduce clearance."""
-
-        smoothed = [path[0]]
+        grid = self.cost_map.grid
+        result = [path[0]]
         anchor = 0
         while anchor < len(path) - 1:
             target = len(path) - 1
-            while target > anchor + 1 and not self._shortcut_keeps_clearance(path[anchor : target + 1]):
+            while target > anchor + 1 and not grid.line_is_free(
+                path[anchor], path[target]
+            ):
                 target -= 1
-            smoothed.append(path[target])
+            result.append(path[target])
             anchor = target
-        return tuple(smoothed)
-
-    def _shortcut_keeps_clearance(self, segment: Sequence[Point2D]) -> bool:
-        """A straight line replacing ``segment`` stays free and no closer to obstacles."""
-
-        grid = self.cost_map.grid
-        samples = list(grid.line_samples(segment[0], segment[-1]))
-        return all(grid.is_free(point) for point in samples) and (
-            min(grid.clearance_at(point) for point in samples) + 1e-9
-            >= min(grid.clearance_at(point) for point in segment)
-        )
+        return tuple(result)

@@ -226,7 +226,7 @@ Publish message rỗng:
 
 ```json
 {
-  "linear": {"x": 0.22, "y": 0, "z": 0},
+  "linear": {"x": 0.30, "y": 0, "z": 0},
   "angular": {"x": 0, "y": 0, "z": 0.55}
 }
 ```
@@ -250,7 +250,7 @@ Khi nhả phím, mất focus cửa sổ hoặc chuyển sang navigation, fronten
 ```
 
 Node `ros/src/bringup/scripts/cmd_vel_arbiter.py` chọn duy nhất nguồn manual
-hoặc custom navigation, giới hạn `|linear.x| <= 0.22 m/s` và
+hoặc navigation, giới hạn `-0.22 <= linear.x <= 0.30 m/s` và
 `|angular.z| <= 0.55 rad/s`. Lệnh manual hết hạn sau `350 ms`; vì vậy xe tự
 dừng nếu trình duyệt ngừng gửi lệnh. Arbiter xuất lệnh an toàn cuối cùng lên
 `/cmd_vel` ở `20 Hz`.
@@ -280,7 +280,7 @@ TF map -> base_footprint
       -> web_bridge -> /robot_pose       -> realtimeRos -> overlay canvas
 
 Web keyboard -> /web/cmd_vel_manual -------------------------------+
-Custom navigation -> /cmd_vel_nav -------------------------------+-> cmd_vel_arbiter -> /cmd_vel
+Navigation -> /cmd_vel_nav --------------------------------------+-> cmd_vel_arbiter -> /cmd_vel
 Web UI       -> /web/control_mode --------------------------------+
 ```
 

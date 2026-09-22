@@ -21,13 +21,15 @@ class CmdVelArbiter(Node):
         self.declare_parameter('manual_timeout', 0.35)
         self.declare_parameter('nav_timeout', 0.60)
         self.declare_parameter('publish_rate', 20.0)
-        self.declare_parameter('max_linear_x', 0.22)
+        self.declare_parameter('min_linear_x', -0.22)
+        self.declare_parameter('max_linear_x', 0.30)
         self.declare_parameter('max_angular_z', 0.55)
 
         self.mode = str(self.get_parameter('default_mode').value)
         self.manual_timeout = float(self.get_parameter('manual_timeout').value)
         self.nav_timeout = float(self.get_parameter('nav_timeout').value)
-        self.max_linear_x = abs(float(self.get_parameter('max_linear_x').value))
+        self.min_linear_x = min(0.0, float(self.get_parameter('min_linear_x').value))
+        self.max_linear_x = max(0.0, float(self.get_parameter('max_linear_x').value))
         self.max_angular_z = abs(float(self.get_parameter('max_angular_z').value))
         self.emergency_stop = False
         self.manual_command = Twist()
@@ -52,8 +54,8 @@ class CmdVelArbiter(Node):
         self.get_logger().info('cmd_vel arbiter mode=%s' % self.mode)
 
     @staticmethod
-    def clamp(value, limit):
-        return max(-limit, min(limit, float(value)))
+    def clamp(value, minimum, maximum):
+        return max(minimum, min(maximum, float(value)))
 
     def manual_callback(self, message):
         self.manual_command = message
@@ -91,12 +93,16 @@ class CmdVelArbiter(Node):
             elif self.mode == 'nav' and now - self.nav_time <= self.nav_timeout:
                 selected = self.nav_command
 
-        selected.linear.x = self.clamp(selected.linear.x, self.max_linear_x)
+        selected.linear.x = self.clamp(
+            selected.linear.x, self.min_linear_x, self.max_linear_x
+        )
         selected.linear.y = 0.0
         selected.linear.z = 0.0
         selected.angular.x = 0.0
         selected.angular.y = 0.0
-        selected.angular.z = self.clamp(selected.angular.z, self.max_angular_z)
+        selected.angular.z = self.clamp(
+            selected.angular.z, -self.max_angular_z, self.max_angular_z
+        )
         self.output.publish(selected)
 
     def publish_stop(self, count=5):

@@ -1,6 +1,6 @@
 # AMR
 
-Mobile robot platform with ROS 2, custom navigation, and a web UI.
+Mobile robot platform with ROS 2, navigation, and a web UI.
 
 ![AMR Web UI demo](docs/demo.jpg)
 
@@ -29,7 +29,7 @@ Main data flows:
 
 ```text
 Browser / tablet
-├── Goal:   /web/goal_pose ───────────────> web_bridge ─> custom navigation ─> /cmd_vel_nav ─┐
+├── Goal:   /web/goal_pose ───────────────> web_bridge ─> navigation ─> /cmd_vel_nav ─┐
 ├── Manual: /web/cmd_vel_manual ────────────────────────────────────────────────┼─> cmd_vel_arbiter ─> /cmd_vel ─> Agent ─> ESP32 ─> Motor
 ├── Mode:   /web/control_mode ──────────────────────────────────────────────────┘
 ├── Map:    /web/map <──────────────────── web_bridge <─ /map <─ slam_toolbox <─ /scan (LiDAR)
@@ -56,19 +56,13 @@ Open the container shell:
 ./shell.sh
 ```
 
-Inside the container, start ROS 2 with custom navigation:
+Inside the container, start ROS 2 with navigation:
 
 ```bash
 ros2 launch bringup web.launch.py
 ```
 
-The launch file accepts the explicit custom backend argument as well:
-
-```bash
-ros2 launch bringup web.launch.py navigation_backend:=custom
-```
-
-The custom backend owns `/navigate_to_pose` and publishes navigation commands to
+The navigation node owns `/navigate_to_pose` and publishes navigation commands to
 `/cmd_vel_nav`; `cmd_vel_arbiter.py` remains the final safety gate.
 
 ### Web UI

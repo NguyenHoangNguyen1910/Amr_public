@@ -1,16 +1,16 @@
 #!/usr/bin/env python3
 
-"""Entrypoint for the ROS 2 custom navigation backend."""
+"""Entrypoint for the ROS 2 navigation backend."""
 
 import rclpy
 from rclpy.executors import ExternalShutdownException, MultiThreadedExecutor
 
-from custom_navigation.ros_adapter import CustomNavigationNode
+from navigation.ros_adapter import NavigationNode
 
 
 def main(args=None):
     rclpy.init(args=args)
-    node = CustomNavigationNode()
+    node = NavigationNode()
     executor = MultiThreadedExecutor(num_threads=4)
     executor.add_node(node)
     try:
