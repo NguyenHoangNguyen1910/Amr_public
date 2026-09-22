@@ -78,6 +78,7 @@ def generate_launch_description():
             package='bringup',
             executable='web_bridge.py',
             name='web_bridge',
+            parameters=[{'transform_timeout': 0.30}],
             output='screen',
         ),
         Node(

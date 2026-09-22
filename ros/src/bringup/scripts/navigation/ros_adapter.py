@@ -31,7 +31,6 @@ from .global_planner import OccupancyGrid
 from .navigator import Navigator
 from .types import (
     NavigationInput,
-    NavigationResult,
     Point2D,
     Pose2D,
     SensorDataError,
@@ -367,12 +366,10 @@ class NavigationNode(Node):
                 self.publish_stop()
                 goal_handle.canceled()
                 return NavigateToPose.Result()
-            started_at = time.monotonic()
             while not self._shutdown:
                 result = navigator.step(self.navigation_input())
                 self.publish_velocity(result.command.linear, result.command.angular)
                 self._publish_plan(result.path)
-                self._publish_feedback(goal_handle, result, time.monotonic() - started_at)
                 if goal_handle.is_cancel_requested:
                     navigator.cancel()
                     goal_handle.canceled()
@@ -402,21 +399,6 @@ class NavigationNode(Node):
                 if self._active_navigator is navigator:
                     self._active_navigator = None
                 self._goal_reserved = False
-
-    def _publish_feedback(
-        self, goal_handle, result: NavigationResult, elapsed: float
-    ) -> None:
-        feedback = NavigateToPose.Feedback()
-        feedback.current_pose = self._pose_stamped(
-            result.pose.x, result.pose.y, result.pose.yaw
-        )
-        feedback.distance_remaining = math.hypot(
-            result.goal.x - result.pose.x, result.goal.y - result.pose.y
-        )
-        feedback.navigation_time = Duration(seconds=max(0.0, elapsed)).to_msg()
-        feedback.estimated_time_remaining = Duration().to_msg()
-        feedback.number_of_recoveries = 0
-        goal_handle.publish_feedback(feedback)
 
     def _publish_plan(self, path: tuple[Point2D, ...]) -> None:
         points = tuple((point.x, point.y) for point in path)

@@ -8,7 +8,7 @@ import time
 
 import rclpy
 from action_msgs.msg import GoalStatus
-from geometry_msgs.msg import PoseStamped, PoseWithCovarianceStamped
+from geometry_msgs.msg import PoseStamped
 from nav_msgs.msg import OccupancyGrid
 from rclpy.action import ActionClient
 from rclpy.duration import Duration
@@ -77,23 +77,11 @@ class WebBridge(Node):
             OccupancyGrid, '/web/map', map_qos)
         self.status_publisher = self.create_publisher(
             String, '/web/nav_status', qos)
-        self.feedback_publisher = self.create_publisher(
-            String, '/web/nav_feedback', qos)
-        self.active_goal_publisher = self.create_publisher(
-            PoseStamped, '/web/active_goal', qos)
 
         self.create_subscription(
             LaserScan, '/scan', self.scan_callback, qos_profile_sensor_data)
         self.create_subscription(
             OccupancyGrid, '/map', self.map_callback, map_qos)
-        self.create_subscription(
-            PoseWithCovarianceStamped, '/amcl_pose',
-            self.localization_callback, qos)
-        self.create_subscription(
-            PoseWithCovarianceStamped, '/pose',
-            self.localization_callback, qos)
-        self.create_subscription(
-            PoseStamped, '/robot_pose', self.localization_callback, qos)
         self.create_subscription(
             PoseStamped, '/web/goal_pose', self.goal_callback, qos)
         self.create_subscription(
@@ -117,6 +105,7 @@ class WebBridge(Node):
         pose.pose.position.y = transform.transform.translation.y
         pose.pose.position.z = transform.transform.translation.z
         pose.pose.orientation = transform.transform.rotation
+        self.localized = True
         self.pose_publisher.publish(pose)
 
     def scan_callback(self, scan):
@@ -212,20 +201,12 @@ class WebBridge(Node):
 
         return web_points
 
-    def localization_callback(self, _message):
-        self.localized = True
-
     def publish_status(self, state, message='', **extra):
         payload = {'state': state, 'message': message}
         payload.update(extra)
         output = String()
         output.data = json.dumps(payload, separators=(',', ':'))
         self.status_publisher.publish(output)
-
-    def publish_feedback(self, **values):
-        output = String()
-        output.data = json.dumps(values, separators=(',', ':'))
-        self.feedback_publisher.publish(output)
 
     def valid_pose(self, message):
         if message.header.frame_id not in ('', self.map_frame):
@@ -275,13 +256,8 @@ class WebBridge(Node):
 
         goal = NavigateToPose.Goal()
         goal.pose = message
-        self.active_goal_publisher.publish(message)
         self.publish_status('PLANNING', 'sending goal to navigation')
-        future = self.action_client.send_goal_async(
-            goal,
-            feedback_callback=lambda feedback: self.feedback_callback(
-                feedback, sequence),
-        )
+        future = self.action_client.send_goal_async(goal)
         future.add_done_callback(
             lambda result: self.goal_response_callback(result, sequence))
 
@@ -303,15 +279,6 @@ class WebBridge(Node):
         result_future = handle.get_result_async()
         result_future.add_done_callback(
             lambda result: self.result_callback(result, sequence))
-
-    def feedback_callback(self, feedback_message, sequence):
-        if sequence != self.goal_sequence:
-            return
-        distance = getattr(
-            feedback_message.feedback, 'distance_remaining', None)
-        if distance is not None:
-            self.publish_feedback(
-                state='MOVING', distance_remaining=float(distance))
 
     def result_callback(self, future, sequence):
         if sequence != self.goal_sequence:
