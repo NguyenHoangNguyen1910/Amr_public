@@ -98,7 +98,7 @@ ros/src/bringup/test/test_navigation_safety.py
 Vai trò:
 
 - `navigation_node.py`: entrypoint ROS 2, tạo node và executor.
-- `config.py`: cấu hình riêng cho robot thật; không giữ thông số Gazebo mặc định.
+- `config.py`: schema, validation và fallback cho cấu hình navigation.
 - `types.py`: data contracts, phép biến đổi hình học, chuẩn hóa góc và xử lý
   path.
 - `global_planner.py`: occupancy grid, inflation, costmap và Dijkstra.
@@ -115,9 +115,9 @@ Vai trò:
 | File | Thay đổi |
 |---|---|
 | `ros/src/bringup/launch/web.launch.py` | Khởi chạy navigation node duy nhất |
-| `ros/src/bringup/CMakeLists.txt` | Cài executable, Python package và config |
+| `ros/src/bringup/CMakeLists.txt` | Cài executable, Python package và config SLAM |
 | `ros/src/bringup/package.xml` | Khai báo Python/NumPy và các ROS dependency trực tiếp của navigation node |
-| `build.sh` | Kiểm tra executable, module và config đã được cài đúng |
+| `build.sh` | Kiểm tra executable và module đã được cài đúng |
 | `README.md` | Cập nhật topology và lệnh chạy navigation |
 | `docs/web_topics.md` | Ghi rõ navigation node publish `/plan` và nhận goal qua local action |
 
@@ -334,6 +334,11 @@ navigation:
 Các trọng số DWA, lookahead, prediction horizon, sample count và clearance được
 copy làm điểm bắt đầu nhưng phải benchmark trên Raspberry Pi 5 và tune với vận
 tốc thấp của robot thật.
+
+Khi chạy qua `shell.sh`, launch đọc trực tiếp
+`/workspace/src/bringup/config/navigation.yaml`. Sửa file này rồi restart launch
+để áp dụng, không cần build lại. Có thể chọn file khác bằng
+`navigation_config:=/path/to/navigation.yaml`.
 
 ## 10. Launch navigation
 

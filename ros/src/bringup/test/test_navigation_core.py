@@ -23,7 +23,7 @@ class NavigationCoreTest(unittest.TestCase):
 
     @staticmethod
     def navigation_input(x=0.0, y=0.0, yaw=0.0):
-        return NavigationInput(Pose2D(x, y, yaw), STOP, 1, ())
+        return NavigationInput(Pose2D(x, y, yaw), STOP, ())
 
     def test_session_tracks_a_clear_goal(self):
         navigator = Navigator(self.grid, self.config)

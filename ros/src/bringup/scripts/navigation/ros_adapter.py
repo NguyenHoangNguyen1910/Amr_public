@@ -98,7 +98,6 @@ class NavigationNode(Node):
         self._latest_odom: Odometry | None = None
         self._scan_received_at: float | None = None
         self._odom_received_at: float | None = None
-        self._scan_sequence = 0
         self._latest_map: RosOccupancyGrid | None = None
         self._active_navigator: Navigator | None = None
         self._goal_reserved = False
@@ -196,7 +195,6 @@ class NavigationNode(Node):
         with self._sensor_lock:
             self._latest_scan = message
             self._scan_received_at = time.monotonic()
-            self._scan_sequence += 1
 
     def _odom_callback(self, message: Odometry) -> None:
         with self._sensor_lock:
@@ -209,7 +207,6 @@ class NavigationNode(Node):
             odometry = self._latest_odom
             scan_time = self._scan_received_at
             odom_time = self._odom_received_at
-            sequence = self._scan_sequence
 
         now = time.monotonic()
         timeout = self.config.sensor_timeout_seconds
@@ -229,7 +226,6 @@ class NavigationNode(Node):
                 _finite(odometry.twist.twist.linear.x, "odometry linear velocity"),
                 _finite(odometry.twist.twist.angular.z, "odometry angular velocity"),
             ),
-            sequence,
             self._scan_points(scan, stamp),
         )
 
@@ -294,9 +290,6 @@ class NavigationNode(Node):
                 )
             )
         return tuple(points)
-
-    def set_velocity(self, linear: float, angular: float) -> object:
-        return self.publish_velocity(linear, angular)
 
     def publish_velocity(self, linear: float, angular: float) -> dict[str, float]:
         linear = self._clamp_finite(linear, self.config.max_linear_velocity_mps)
@@ -368,7 +361,7 @@ class NavigationNode(Node):
             )
             navigation_input = self.navigation_input()
             navigator.plan(goal_point, navigation_input)
-            self._publish_plan(navigator.plan_data.path)
+            self._publish_plan(navigator.path)
             if goal_handle.is_cancel_requested:
                 navigator.cancel()
                 self.publish_stop()

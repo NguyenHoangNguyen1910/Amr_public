@@ -50,6 +50,11 @@ docker run --rm \
           "-DCMAKE_CXX_FLAGS_RELEASE=-O0 -DNDEBUG"
   '
 
+docker run --rm \
+  --volume "$WORKSPACE:/workspace" \
+  "$ROS_IMAGE" \
+  rm -f /workspace/install/bringup/share/bringup/config/navigation.yaml
+
 test -x "$WORKSPACE/install/robot_localization/lib/robot_localization/ekf_node"
 test -f "$WORKSPACE/install/bringup/share/bringup/msg/ScanPoints.idl"
 test -f "$WORKSPACE/install/bringup/share/bringup/action/NavigateToPose.idl"
@@ -58,7 +63,6 @@ test -x "$WORKSPACE/install/bringup/lib/bringup/camera_mjpeg.py"
 test -x "$WORKSPACE/install/bringup/lib/bringup/cmd_vel_arbiter.py"
 test -x "$WORKSPACE/install/bringup/lib/bringup/web_bridge.py"
 test -x "$WORKSPACE/install/bringup/lib/bringup/navigation_node.py"
-test -f "$WORKSPACE/install/bringup/share/bringup/config/navigation.yaml"
 test -f "$WORKSPACE/install/bringup/local/lib/python3.10/dist-packages/navigation/ros_adapter.py" || \
   test -f "$WORKSPACE/install/bringup/local/lib/python3.12/dist-packages/navigation/ros_adapter.py"
 

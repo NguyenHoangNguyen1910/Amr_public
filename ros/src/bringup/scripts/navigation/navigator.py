@@ -11,7 +11,6 @@ from .local_planner import LocalPlanner
 from .types import (
     STOP,
     GoalPhase,
-    GlobalPlan,
     NavigationInput,
     NavigationResult,
     Point2D,
@@ -37,7 +36,7 @@ class Navigator:
         self.local_planner = LocalPlanner(self.cost_map, config)
         self.goal: Point2D | None = None
         self.planner: GlobalPlanner | None = None
-        self.plan_data: GlobalPlan | None = None
+        self.path: tuple[Point2D, ...] = ()
         self.phase = GoalPhase.TRACKING
         self.state = State.ERROR
         self.command = STOP
@@ -45,7 +44,6 @@ class Navigator:
         self.last_progress = 0.0
         self.stable_cycles = 0
         self.clearance_m: float | None = None
-        self.error: str | None = None
 
     def plan(
         self,
@@ -60,7 +58,7 @@ class Navigator:
         self.cost_map.clear_dynamic_obstacles()
         self.goal = goal
         self.planner = GlobalPlanner(self.cost_map, goal, self.config)
-        self.plan_data = self.planner.plan(navigation_input.pose.to_point())
+        self.path = self.planner.plan(navigation_input.pose.to_point())
         self.phase = GoalPhase.TRACKING
         self.state = State.NAVIGATING
         self.command = STOP
@@ -68,7 +66,6 @@ class Navigator:
         self.last_progress = time.monotonic() if now is None else now
         self.stable_cycles = 0
         self.clearance_m = None
-        self.error = None
 
     def cancel(self) -> None:
         self.command = STOP
@@ -101,23 +98,22 @@ class Navigator:
         )
         return position_ok and yaw_ok and velocity_ok
 
-    def _result(self, pose, error: str | None = None) -> NavigationResult:
-        if self.goal is None or self.plan_data is None:
+    def _result(self, pose) -> NavigationResult:
+        if self.goal is None or not self.path:
             raise RuntimeError("navigation session is not planned")
         return NavigationResult(
             self.state,
             self.command,
             pose,
             self.goal,
-            self.plan_data.path,
+            self.path,
             self.clearance_m,
-            error or self.error,
         )
 
     def step(
         self, navigation_input: NavigationInput, now: float | None = None
     ) -> NavigationResult:
-        if self.goal is None or self.planner is None or self.plan_data is None:
+        if self.goal is None or self.planner is None or not self.path:
             raise RuntimeError("plan() must be called before step()")
         if self.state is not State.NAVIGATING:
             return self._result(navigation_input.pose)
@@ -133,20 +129,19 @@ class Navigator:
         try:
             self.cost_map.update_world_obstacles(seen, now)
             self.planner.refresh()
-            self.plan_data = self.planner.plan(position)
+            self.path = self.planner.plan(position)
             decision = self.local_planner.command(
                 navigation_input.pose,
                 navigation_input.velocity,
-                self.plan_data.path,
+                self.path,
                 navigation_input.obstacles_robot,
                 self.planner,
                 self.goal,
                 self.phase is GoalPhase.FINAL,
             )
-        except (PlanningError, SensorDataError) as error:
+        except (PlanningError, SensorDataError):
             self.command = STOP
             self.clearance_m = None
-            self.error = str(error)
             if now - self.last_progress > self.config.no_progress_timeout_seconds:
                 self.state = State.BLOCKED
             return self._result(navigation_input.pose)
@@ -172,7 +167,6 @@ class Navigator:
         if now - self.last_progress > self.config.no_progress_timeout_seconds:
             self.command = STOP
             self.state = State.BLOCKED
-            self.error = "no progress"
 
         if self.phase is GoalPhase.FINAL and self._goal_is_stable(navigation_input):
             self.stable_cycles += 1

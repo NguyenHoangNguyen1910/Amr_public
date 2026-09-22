@@ -14,12 +14,6 @@ class Point2D:
     y: float
     yaw: float | None = None
 
-    def to_dict(self) -> dict[str, float]:
-        result = {"x": self.x, "y": self.y}
-        if self.yaw is not None:
-            result["yaw"] = self.yaw
-        return result
-
 
 @dataclass(frozen=True)
 class Pose2D:
@@ -54,11 +48,6 @@ class GoalPhase(str, Enum):
 
 
 @dataclass(frozen=True)
-class GlobalPlan:
-    path: tuple[Point2D, ...]
-
-
-@dataclass(frozen=True)
 class ControlDecision:
     command: Velocity
     clearance_m: float | None
@@ -70,7 +59,6 @@ class ControlDecision:
 class NavigationInput:
     pose: Pose2D
     velocity: Velocity
-    scan_sequence: int
     obstacles_robot: tuple[Point2D, ...]
 
 
@@ -82,7 +70,6 @@ class NavigationResult:
     goal: Point2D
     path: tuple[Point2D, ...]
     clearance_m: float | None
-    error: str | None = None
 
 
 class SensorDataError(RuntimeError):

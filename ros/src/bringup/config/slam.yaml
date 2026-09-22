@@ -1,67 +1,72 @@
 slam_toolbox:
   ros__parameters:
-    use_sim_time: false
+    # Nguồn thời gian.
+    use_sim_time: false                         # Dùng clock thật thay vì /clock của simulator.
 
-    solver_plugin: solver_plugins::CeresSolver
-    ceres_linear_solver: SPARSE_NORMAL_CHOLESKY
-    ceres_preconditioner: SCHUR_JACOBI
-    ceres_trust_strategy: LEVENBERG_MARQUARDT
-    ceres_dogleg_type: TRADITIONAL_DOGLEG
-    ceres_loss_function: HuberLoss
+    # Ceres pose-graph solver.
+    solver_plugin: solver_plugins::CeresSolver  # Backend tối ưu pose graph.
+    ceres_linear_solver: SPARSE_NORMAL_CHOLESKY # Linear solver cho bài toán sparse.
+    ceres_preconditioner: SCHUR_JACOBI           # Preconditioner của Ceres.
+    ceres_trust_strategy: LEVENBERG_MARQUARDT   # Trust-region strategy khi tối ưu.
+    ceres_dogleg_type: TRADITIONAL_DOGLEG        # Dogleg variant nếu strategy sử dụng.
+    ceres_loss_function: HuberLoss               # Robust loss giảm ảnh hưởng outlier.
 
-    odom_frame: odom
-    map_frame: map
-    base_frame: base_footprint
-    scan_topic: /scan
-    mode: mapping
-    debug_logging: false
+    # ROS frames, topic và mode.
+    odom_frame: odom                             # Frame odometry đầu vào.
+    map_frame: map                               # Frame map toàn cục xuất ra.
+    base_frame: base_footprint                   # Frame base robot để scan matching.
+    scan_topic: /scan                            # LiDAR input.
+    mode: mapping                                # Vừa xây map vừa localize.
+    debug_logging: false                         # Tắt log debug để giảm I/O.
 
-    throttle_scans: 1
-    transform_publish_period: 0.05
-    # Four map updates per second keeps the web map close to the live pose.
-    # Lower values make full OccupancyGrid serialization disproportionately
-    # expensive as the explored map grows.
+    # LiDAR input, TF và OccupancyGrid output.
+    throttle_scans: 1                            # Dùng mỗi scan; >1 là bỏ bớt scan.
+    transform_publish_period: 0.05               # Publish TF map->odom ở 20 Hz.
+    # Update map 2 Hz để web theo kịp pose mà không serialize OccupancyGrid quá nhiều.
     map_update_interval: 0.5
-    resolution: 0.05
-    min_laser_range: 0.12
-    max_laser_range: 8.0
-    transform_timeout: 1.0
-    tf_buffer_duration: 30.0
-    enable_interactive_mode: false
-    scan_queue_size: 100
+    resolution: 0.05                             # Resolution map, mét/cell.
+    min_laser_range: 0.12                        # Bỏ ray gần hơn khoảng cách này.
+    max_laser_range: 8.0                         # Bỏ ray xa hơn khoảng cách này.
+    transform_timeout: 1.0                       # Thời gian tối đa chờ TF.
+    tf_buffer_duration: 30.0                     # Lịch sử TF giữ trong buffer.
+    enable_interactive_mode: false               # Tắt interactive markers của RViz.
+    scan_queue_size: 100                         # Số scan chờ khi xử lý chưa kịp.
 
-    # Reject scan noise while the robot is stationary.
-    use_scan_matching: true
-    use_scan_barycenter: true
-    minimum_time_interval: 0.08
-    minimum_travel_distance: 0.10
-    minimum_travel_heading: 0.10
+    # Điều kiện nhận scan mới cho scan matching.
+    use_scan_matching: true                      # Align scan mới với map/scan trước.
+    use_scan_barycenter: true                    # Dùng barycenter để khởi tạo scan matching.
+    minimum_time_interval: 0.08                  # Khoảng thời gian tối thiểu giữa scan được xử lý.
+    minimum_travel_distance: 0.10                # Quãng đường tối thiểu để nhận scan mới.
+    minimum_travel_heading: 0.10                 # Góc quay tối thiểu (rad) để nhận scan mới.
 
-    scan_buffer_size: 10
-    scan_buffer_maximum_scan_distance: 10.0
-    link_match_minimum_response_fine: 0.15
-    link_scan_maximum_distance: 1.5
+    # Liên kết scan gần nhau trong pose graph.
+    scan_buffer_size: 10                         # Số scan gần nhất giữ để matching.
+    scan_buffer_maximum_scan_distance: 10.0      # Khoảng cách tối đa của scan trong buffer.
+    link_match_minimum_response_fine: 0.15       # Score fine tối thiểu để tạo link scan.
+    link_scan_maximum_distance: 1.5              # Khoảng cách tối đa giữa scan để tạo link.
 
-    do_loop_closing: true
-    loop_search_maximum_distance: 3.0
-    loop_match_minimum_chain_size: 15
-    loop_match_maximum_variance_coarse: 1.0
-    loop_match_minimum_response_coarse: 0.45
-    loop_match_minimum_response_fine: 0.55
+    # Loop closure để giảm drift map dài hạn.
+    do_loop_closing: true                        # Bật tìm loop closure.
+    loop_search_maximum_distance: 3.0            # Bán kính tìm candidate loop closure.
+    loop_match_minimum_chain_size: 15            # Số node chain tối thiểu trước khi match loop.
+    loop_match_maximum_variance_coarse: 1.0      # Variance coarse tối đa chấp nhận.
+    loop_match_minimum_response_coarse: 0.45     # Score coarse tối thiểu.
+    loop_match_minimum_response_fine: 0.55       # Score fine tối thiểu.
 
-    correlation_search_space_dimension: 0.5
-    correlation_search_space_resolution: 0.01
-    correlation_search_space_smear_deviation: 0.1
-    loop_search_space_dimension: 4.0
-    loop_search_space_resolution: 0.05
-    loop_search_space_smear_deviation: 0.03
-    distance_variance_penalty: 0.5
-    angle_variance_penalty: 1.0
-    fine_search_angle_offset: 0.00349
-    coarse_search_angle_offset: 0.785
-    coarse_angle_resolution: 0.0349
-    minimum_angle_penalty: 0.9
-    minimum_distance_penalty: 0.5
-    use_response_expansion: true
-    min_pass_through: 3
-    occupancy_threshold: 0.1
+    # Không gian tìm và penalty của scan matcher.
+    correlation_search_space_dimension: 0.5      # Kích thước không gian tìm local correlation.
+    correlation_search_space_resolution: 0.01    # Resolution không gian tìm local.
+    correlation_search_space_smear_deviation: 0.1  # Độ blur correlation local.
+    loop_search_space_dimension: 4.0             # Kích thước không gian tìm loop closure.
+    loop_search_space_resolution: 0.05           # Resolution không gian tìm loop closure.
+    loop_search_space_smear_deviation: 0.03      # Độ blur correlation loop closure.
+    distance_variance_penalty: 0.5               # Phạt sai lệch translation lớn.
+    angle_variance_penalty: 1.0                  # Phạt sai lệch rotation lớn.
+    fine_search_angle_offset: 0.00349            # Bước góc fine search, rad.
+    coarse_search_angle_offset: 0.785            # Biên góc coarse search, rad.
+    coarse_angle_resolution: 0.0349              # Bước góc coarse search, rad.
+    minimum_angle_penalty: 0.9                   # Penalty góc tối thiểu cho match.
+    minimum_distance_penalty: 0.5                # Penalty khoảng cách tối thiểu cho match.
+    use_response_expansion: true                 # Mở rộng vùng candidate có response tốt.
+    min_pass_through: 3                          # Số ray tối thiểu đi qua cell free.
+    occupancy_threshold: 0.1                     # Ngưỡng probability để đánh dấu occupied.

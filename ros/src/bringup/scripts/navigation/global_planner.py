@@ -11,7 +11,7 @@ import numpy as np
 from scipy.ndimage import distance_transform_edt
 
 from .config import NavigationConfig
-from .types import GlobalPlan, Point2D, distance, lerp, resample_path
+from .types import Point2D, distance, lerp, resample_path
 
 Cell = tuple[int, int]
 _DIAGONAL = math.sqrt(2.0)
@@ -249,7 +249,7 @@ class GlobalPlanner:
             return (before - after) * self.cost_map.grid.resolution_m
         return math.inf if math.isfinite(after) else -math.inf
 
-    def plan(self, start: Point2D) -> GlobalPlan:
+    def plan(self, start: Point2D) -> tuple[Point2D, ...]:
         grid = self.cost_map.grid
         first = self._reachable_cell(start)
         cells = [first]
@@ -263,7 +263,7 @@ class GlobalPlanner:
             raw.insert(0, start)
         raw[-1] = self.goal
         path = resample_path(self._smooth(raw), self.config.waypoint_spacing_m)
-        return GlobalPlan(path)
+        return path
 
     def _smooth(self, path: Sequence[Point2D]) -> tuple[Point2D, ...]:
         grid = self.cost_map.grid

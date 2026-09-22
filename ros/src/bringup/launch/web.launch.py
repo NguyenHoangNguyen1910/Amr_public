@@ -18,8 +18,7 @@ def generate_launch_description():
     bringup_share = get_package_share_directory('bringup')
     slam_params = os.path.join(
         bringup_share, 'config', 'slam.yaml')
-    navigation_params = os.path.join(
-        bringup_share, 'config', 'navigation.yaml')
+    navigation_config = LaunchConfiguration('navigation_config')
     camera_params = os.path.join(
         get_package_share_directory('usb_cam'), 'config', 'params_1.yaml')
 
@@ -27,6 +26,10 @@ def generate_launch_description():
         DeclareLaunchArgument(
             'use_camera', default_value='true',
             description='Start USB camera'),
+        DeclareLaunchArgument(
+            'navigation_config',
+            default_value='/workspace/src/bringup/config/navigation.yaml',
+            description='Navigation parameter file'),
         IncludeLaunchDescription(
             PythonLaunchDescriptionSource(os.path.join(
                 get_package_share_directory('imu_complementary_filter'),
@@ -89,7 +92,7 @@ def generate_launch_description():
             executable='navigation_node.py',
             name='navigation',
             output='screen',
-            parameters=[navigation_params],
+            parameters=[navigation_config],
         ),
         IncludeLaunchDescription(
             FrontendLaunchDescriptionSource(os.path.join(

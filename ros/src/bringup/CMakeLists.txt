@@ -34,9 +34,8 @@ install(
 )
 
 install(
-  DIRECTORY config/
+  FILES config/slam.yaml
   DESTINATION share/${PROJECT_NAME}/config
-  FILES_MATCHING PATTERN "*.yaml"
 )
 
 ament_export_dependencies(rosidl_default_runtime)
