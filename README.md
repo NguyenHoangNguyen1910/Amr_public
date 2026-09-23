@@ -2,6 +2,10 @@
 
 Mobile robot platform with ROS 2, navigation, and a web UI.
 
+The same stack can run against either the real robot or a headless 2D virtual
+robot. See [`docs/simulation.md`](docs/simulation.md) for backend switching and
+the saved-map workflow.
+
 ![AMR Web UI demo](docs/demo.jpg)
 
 ## Topology
@@ -64,6 +68,24 @@ ros2 launch bringup web.launch.py
 
 The navigation node owns `/navigate_to_pose` and publishes navigation commands to
 `/cmd_vel_nav`; `cmd_vel_arbiter.py` remains the final safety gate.
+
+## Run without robot hardware
+
+```bash
+./build.sh
+ROBOT_BACKEND=simulation ./bootstrap.sh
+./shell.sh
+```
+
+Inside the container:
+
+```bash
+ros2 launch bringup web.launch.py robot_backend:=simulation use_camera:=false
+```
+
+The virtual adapter publishes the same `/map`, `/scan`, `/odom` and TF contract
+used by the rest of the stack, so the existing web UI and navigation remain
+unchanged. It can also simulate directly on a map saved from the real robot.
 
 ### Web UI
 

@@ -20,11 +20,16 @@ install(
     scripts/cmd_vel_arbiter.py
     scripts/web_bridge.py
     scripts/navigation_node.py
+    scripts/simulation_adapter.py
   DESTINATION lib/${PROJECT_NAME}
 )
 
 ament_python_install_package(navigation
   PACKAGE_DIR scripts/navigation
+)
+
+ament_python_install_package(simulation
+  PACKAGE_DIR scripts/simulation
 )
 
 install(
@@ -34,8 +39,8 @@ install(
 )
 
 install(
-  FILES config/slam.yaml
-  DESTINATION share/${PROJECT_NAME}/config
+  DIRECTORY config maps
+  DESTINATION share/${PROJECT_NAME}
 )
 
 ament_export_dependencies(rosidl_default_runtime)
