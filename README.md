@@ -48,26 +48,13 @@ for the web topic details.
 
 ## Run the robot
 
-Start the containers:
+Default backend: `hardware`.
 
 ```bash
 ./bootstrap.sh
-```
-
-Open the container shell:
-
-```bash
 ./shell.sh
-```
-
-Inside the container, start ROS 2 with navigation:
-
-```bash
 ros2 launch bringup web.launch.py
 ```
-
-The navigation node owns `/navigate_to_pose` and publishes navigation commands to
-`/cmd_vel_nav`; `cmd_vel_arbiter.py` remains the final safety gate.
 
 ## Run without robot hardware
 
@@ -75,17 +62,10 @@ The navigation node owns `/navigate_to_pose` and publishes navigation commands t
 ./build.sh
 ROBOT_BACKEND=simulation ./bootstrap.sh
 ./shell.sh
-```
-
-Inside the container:
-
-```bash
 ros2 launch bringup web.launch.py robot_backend:=simulation use_camera:=false
 ```
 
-The virtual adapter publishes the same `/map`, `/scan`, `/odom` and TF contract
-used by the rest of the stack, so the existing web UI and navigation remain
-unchanged. It can also simulate directly on a map saved from the real robot.
+Simulation uses the existing web UI and can load a saved robot map.
 
 ### Web UI
 
