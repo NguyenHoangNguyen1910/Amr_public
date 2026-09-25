@@ -49,7 +49,11 @@ class LocalPlanner:
 
     @staticmethod
     def _samples(low: float, high: float, count: int) -> tuple[float, ...]:
-        return tuple(sorted({0.0, *(float(item) for item in np.linspace(low, high, count))}))
+        samples = {0.0}
+        for item in np.linspace(low, high, count):
+            value = float(item)
+            samples.add(0.0 if abs(value) <= 1e-9 else value)
+        return tuple(sorted(samples))
 
     def _window(self, velocity: Velocity) -> tuple[tuple[float, ...], tuple[float, ...]]:
         config = self.config

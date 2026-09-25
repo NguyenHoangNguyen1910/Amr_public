@@ -16,18 +16,18 @@ navigation:
     robot_radius_m: 0.08                   # Bán kính thân robot.
     safety_margin_m: 0.02                  # Margin global map; inflation tổng là 0.10 m.
     local_safety_margin_m: 0.015           # Margin thêm khi kiểm tra LiDAR local.
-    goal_tolerance_m: 0.12                 # Sai số vị trí tối đa để thành công.
-    goal_terminal_entry_m: 0.20            # Vào terminal controller khi gần goal hơn mức này.
-    goal_terminal_exit_m: 0.14             # Rời terminal controller khi đi xa lại quá mức này.
-    goal_yaw_tolerance_rad: 0.20           # Sai số hướng tối đa tại goal có yaw.
-    terminal_linear_velocity_mps: 0.08     # Tốc độ tiến chậm khi căn goal cuối.
-    terminal_angular_velocity_rps: 0.35    # Tốc độ quay tối đa khi căn goal cuối.
+    goal_tolerance_m: 0.06                 # Sai số vị trí tối đa để thành công.
+    goal_terminal_entry_m: 0.30            # Vào terminal controller khi gần goal hơn mức này.
+    goal_terminal_exit_m: 0.08             # Rời terminal controller khi đi xa lại quá mức này.
+    goal_yaw_tolerance_rad: 0.08           # Sai số hướng tối đa tại goal có yaw.
+    terminal_linear_velocity_mps: 0.04     # Tốc độ tiến chậm khi căn goal cuối.
+    terminal_angular_velocity_rps: 0.22    # Tốc độ quay tối đa khi căn goal cuối.
     terminal_heading_rotate_threshold_rad: 0.40  # Lệch hướng lớn hơn mức này thì chỉ quay.
-    terminal_heading_gain: 1.20            # Gain quay để hướng tới vị trí goal.
-    terminal_yaw_gain: 0.90                # Gain quay để khớp yaw cuối.
-    stable_linear_velocity_mps: 0.02       # Ngưỡng linear velocity coi là đứng yên.
-    stable_angular_velocity_rps: 0.03      # Ngưỡng angular velocity coi là đứng yên.
-    stable_goal_cycles: 5                  # Số control cycle ổn định trước khi succeed.
+    terminal_heading_gain: 1.00            # Gain quay để hướng tới vị trí goal.
+    terminal_yaw_gain: 0.80                # Gain quay để khớp yaw cuối.
+    stable_linear_velocity_mps: 0.01       # Ngưỡng linear velocity coi là đứng yên.
+    stable_angular_velocity_rps: 0.02      # Ngưỡng angular velocity coi là đứng yên.
+    stable_goal_cycles: 8                  # Số control cycle ổn định trước khi succeed.
 
     # Global path và DWA local planner.
     waypoint_spacing_m: 0.25               # Khoảng cách resample waypoint của path.
@@ -49,7 +49,7 @@ navigation:
     no_progress_timeout_seconds: 12.0      # Timeout nếu robot không tiến triển.
     minimum_progress_m: 0.04               # Tiến ít nhất mức này để reset no-progress timer.
     temporary_obstacle_ttl_seconds: 2.0    # Thời gian giữ obstacle LiDAR trong costmap.
-    score_progress: 2.4                    # Trọng số tiến gần goal trong DWA score.
+    score_progress: 4.5                    # Trọng số tiến gần goal trong DWA score.
     score_heading: 1.5                     # Trọng số hướng về lookahead target.
     score_clearance: 2.8                   # Trọng số khoảng cách tới obstacle.
     score_speed: 0.6                       # Trọng số ưu tiên tốc độ cao hơn.

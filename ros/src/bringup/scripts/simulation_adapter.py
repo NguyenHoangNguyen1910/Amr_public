@@ -15,8 +15,9 @@ from nav_msgs.msg import OccupancyGrid, Odometry
 from rclpy.node import Node
 from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy
 from sensor_msgs.msg import LaserScan
-from std_srvs.srv import Empty
 from tf2_ros import StaticTransformBroadcaster, TransformBroadcaster
+
+from bringup.srv import ResetSimulation
 
 from simulation import DifferentialDriveSimulator, Pose2D, load_map
 
@@ -73,7 +74,9 @@ class SimulationAdapter(Node):
         self.odom_publisher = self.create_publisher(Odometry, "/odom", 10)
         self.scan_publisher = self.create_publisher(LaserScan, "/scan", 10)
         self.create_subscription(Twist, "/cmd_vel", self._command_callback, 10)
-        self.create_service(Empty, "/simulation/reset", self._reset_callback)
+        self.create_service(
+            ResetSimulation, "/simulation/reset", self._reset_callback
+        )
         self.tf_broadcaster = TransformBroadcaster(self)
         self.static_tf_broadcaster = StaticTransformBroadcaster(self)
         self._publish_static_transform()
@@ -207,14 +210,26 @@ class SimulationAdapter(Node):
         transform.transform.rotation.w = 1.0
         self.static_tf_broadcaster.sendTransform(transform)
 
-    def _reset_callback(self, _request, response):
+    def _reset_callback(self, request, response):
+        values = (float(request.x), float(request.y), float(request.yaw))
+        if not all(math.isfinite(value) for value in values):
+            response.success = False
+            response.message = "reset pose must be finite"
+            return response
+        pose = Pose2D(*values)
+        if self.grid_map.collides(pose.x, pose.y, self.robot_radius):
+            response.success = False
+            response.message = "reset pose is occupied or too close to an obstacle"
+            return response
         with self._lock:
             self.simulator = DifferentialDriveSimulator(
-                self.grid_map, self.initial_pose, self.robot_radius
+                self.grid_map, pose, self.robot_radius
             )
             self._command = (0.0, 0.0)
             self._command_at = time.monotonic()
             self._last_step = time.monotonic()
+        response.success = True
+        response.message = "simulation reset"
         return response
 
 

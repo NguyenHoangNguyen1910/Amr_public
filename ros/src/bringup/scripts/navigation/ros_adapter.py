@@ -360,7 +360,7 @@ class NavigationNode(Node):
             )
             navigation_input = self.navigation_input()
             navigator.plan(goal_point, navigation_input)
-            self._publish_plan(navigator.path)
+            self._publish_plan(navigator.path, goal_point.yaw)
             if goal_handle.is_cancel_requested:
                 navigator.cancel()
                 self.publish_stop()
@@ -369,7 +369,7 @@ class NavigationNode(Node):
             while not self._shutdown:
                 result = navigator.step(self.navigation_input())
                 self.publish_velocity(result.command.linear, result.command.angular)
-                self._publish_plan(result.path)
+                self._publish_plan(result.path, goal_point.yaw)
                 if goal_handle.is_cancel_requested:
                     navigator.cancel()
                     goal_handle.canceled()
@@ -400,22 +400,35 @@ class NavigationNode(Node):
                     self._active_navigator = None
                 self._goal_reserved = False
 
-    def _publish_plan(self, path: tuple[Point2D, ...]) -> None:
+    def _publish_plan(
+        self, path: tuple[Point2D, ...], goal_yaw: float | None = None
+    ) -> None:
         points = tuple((point.x, point.y) for point in path)
         if points == self._last_path:
             return
         self._last_path = points
-        self._publish_path(points)
+        self._publish_path(points, goal_yaw)
 
     def _publish_empty_plan(self) -> None:
         self._last_path = ()
         self._publish_path(())
 
-    def _publish_path(self, points: tuple[tuple[float, float], ...]) -> None:
+    def _publish_path(
+        self,
+        points: tuple[tuple[float, float], ...],
+        goal_yaw: float | None = None,
+    ) -> None:
         message = Path()
         message.header.frame_id = self.map_frame
         message.header.stamp = self.get_clock().now().to_msg()
-        message.poses = [self._pose_stamped(x, y, 0.0) for x, y in points]
+        message.poses = [
+            self._pose_stamped(
+                x,
+                y,
+                goal_yaw if goal_yaw is not None and index == len(points) - 1 else 0.0,
+            )
+            for index, (x, y) in enumerate(points)
+        ]
         self._plan_publisher.publish(message)
 
     def _pose_stamped(self, x: float, y: float, yaw: float) -> PoseStamped:

@@ -11,6 +11,7 @@ find_package(std_msgs REQUIRED)
 rosidl_generate_interfaces(${PROJECT_NAME}
   "action/NavigateToPose.action"
   "msg/ScanPoints.msg"
+  "srv/ResetSimulation.srv"
   DEPENDENCIES builtin_interfaces geometry_msgs std_msgs
 )
 

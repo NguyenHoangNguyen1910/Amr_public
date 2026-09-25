@@ -22,6 +22,7 @@ log/
 **/build/
 **/install/
 **/log/
+**/.robot_nav_platform
 
 # Runtime logs and local configuration
 *.log

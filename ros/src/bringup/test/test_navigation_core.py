@@ -1,10 +1,12 @@
 import math
 import unittest
+from dataclasses import replace
 
 import numpy as np
 
 from navigation.config import NavigationConfig
 from navigation.global_planner import OccupancyGrid, PlanningError, GlobalPlanner, CostMap
+from navigation.local_planner import LocalPlanner
 from navigation.navigator import Navigator
 from navigation.types import NavigationInput, Point2D, Pose2D, State, STOP
 
@@ -34,6 +36,63 @@ class NavigationCoreTest(unittest.TestCase):
         self.assertEqual(result.state, State.NAVIGATING)
         self.assertGreater(result.command.linear, 0.0)
         self.assertEqual(result.path[-1], Point2D(1.0, 0.0))
+
+    def test_no_progress_watchdog_uses_observed_motion_not_command(self):
+        config = replace(self.config, no_progress_timeout_seconds=1.0)
+        navigator = Navigator(self.grid, config)
+        navigation_input = self.navigation_input()
+        navigator.plan(Point2D(1.0, 0.0), navigation_input, now=0.0)
+
+        first = navigator.step(navigation_input, now=0.1)
+        self.assertNotEqual(first.command, STOP)
+        result = navigator.step(navigation_input, now=1.2)
+
+        self.assertEqual(result.state, State.BLOCKED)
+        self.assertEqual(result.command, STOP)
+
+    def test_final_yaw_progress_resets_watchdog_but_spin_without_progress_does_not(self):
+        config = replace(self.config, no_progress_timeout_seconds=1.0)
+        navigator = Navigator(self.grid, config)
+        goal = Point2D(0.0, 0.0, math.pi / 2.0)
+        initial = self.navigation_input()
+        navigator.plan(goal, initial, now=0.0)
+
+        first = navigator.step(initial, now=0.1)
+        self.assertGreater(first.command.angular, 0.0)
+        turned = self.navigation_input(yaw=0.1)
+        progressing = navigator.step(turned, now=1.2)
+        self.assertEqual(progressing.state, State.NAVIGATING)
+
+        stalled = navigator.step(turned, now=2.3)
+        self.assertEqual(stalled.state, State.BLOCKED)
+        self.assertEqual(stalled.command, STOP)
+
+    def test_terminal_approach_tracks_bearing_rotation_not_final_goal_yaw(self):
+        config = replace(self.config, no_progress_timeout_seconds=1.0)
+        navigator = Navigator(self.grid, config)
+        goal = Point2D(0.0, 0.0, 0.0)
+        initial = self.navigation_input(x=0.13, yaw=0.5)
+        navigator.plan(goal, initial, now=0.0)
+
+        first = navigator.step(initial, now=0.1)
+        self.assertGreater(first.command.angular, 0.0)
+        rotated = self.navigation_input(x=0.13, yaw=0.6)
+        progressing = navigator.step(rotated, now=1.2)
+        self.assertEqual(progressing.state, State.NAVIGATING)
+
+        stalled = navigator.step(rotated, now=2.3)
+        self.assertEqual(stalled.state, State.BLOCKED)
+        self.assertEqual(stalled.command, STOP)
+
+    def test_local_velocity_samples_collapse_floating_point_zero(self):
+        samples = LocalPlanner._samples(
+            -0.10000000000000003,
+            0.09999999999999998,
+            7,
+        )
+
+        near_zero = tuple(value for value in samples if abs(value) <= 1e-9)
+        self.assertEqual(near_zero, (0.0,))
 
     def test_session_finishes_a_stable_goal(self):
         navigator = Navigator(self.grid, self.config)

@@ -11,6 +11,7 @@ readonly ROS_LOCALHOST_ONLY="${ROS_LOCALHOST_ONLY:-1}"
 readonly AUTO_RESET="${AUTO_RESET:-1}"
 readonly ROBOT_BACKEND="${ROBOT_BACKEND:-hardware}"
 readonly SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/platform.sh"
 
 if ! command -v docker >/dev/null 2>&1; then
   echo "Error: docker is not installed or is not in PATH." >&2
@@ -59,6 +60,7 @@ else
   echo "Starting micro-ROS agent on $SERIAL_DEVICE at $SERIAL_BAUDRATE baud (domain $ROS_DOMAIN_ID)."
 
   agent_id="$(docker run -d --rm \
+    --platform "$ROS_PLATFORM" \
     --name "$AGENT_CONTAINER" \
     -v /dev:/dev \
     -v /dev/shm:/dev/shm \

@@ -783,6 +783,15 @@
     }, 200);
     bulkRos.subscribe('/plan', 'nav_msgs/msg/Path', msg => {
       state.path = msg;
+      if (msg.poses && msg.poses.length) {
+        const last = msg.poses[msg.poses.length - 1].pose;
+        state.goal = {
+          position: {x: last.position.x, y: last.position.y},
+          yaw: yawFromQuaternion(last.orientation || {x: 0, y: 0, z: 0, w: 1})
+        };
+        updatePoseReadouts();
+        state.dirty.overlay = true;
+      }
       state.dirty.path = true;
       scheduleRender();
     }, 250);

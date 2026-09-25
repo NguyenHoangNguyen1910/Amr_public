@@ -62,7 +62,14 @@ ros2 launch bringup web.launch.py
 ./build.sh
 ROBOT_BACKEND=simulation ./bootstrap.sh
 ./shell.sh
-ros2 launch bringup web.launch.py robot_backend:=simulation use_camera:=false
+# ros2 launch bringup web.launch.py robot_backend:=simulation use_camera:=false
+ros2 launch bringup web.launch.py \
+    robot_backend:=simulation \
+    sim_map:=/workspace/maps/warehouse_a.yaml \
+    sim_initial_x:=0.005 \
+    sim_initial_y:=0.082 \
+    sim_initial_yaw:=0.001 \
+    use_camera:=false
 ```
 
 Simulation uses the existing web UI and can load a saved robot map.

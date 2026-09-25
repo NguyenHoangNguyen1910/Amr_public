@@ -1,0 +1,6 @@
+.git
+ros/build
+ros/install
+ros/log
+__pycache__
+*.pyc

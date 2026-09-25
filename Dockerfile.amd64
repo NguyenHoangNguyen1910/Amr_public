@@ -1,0 +1,23 @@
+FROM ros:humble-ros-base
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends \
+    python3-colcon-common-extensions \
+    python3-rosdep \
+  && rm -rf /var/lib/apt/lists/*
+
+COPY ros/src /tmp/robot_nav/src
+
+RUN if [ ! -f /etc/ros/rosdep/sources.list.d/20-default.list ]; then rosdep init; fi \
+  && rosdep update \
+  && apt-get update \
+  && rosdep install \
+    --from-paths /tmp/robot_nav/src \
+    --ignore-src \
+    --rosdistro humble \
+    --reinstall \
+    --default-yes \
+  && rm -rf /var/lib/apt/lists/* \
+  && rm -rf /tmp/robot_nav

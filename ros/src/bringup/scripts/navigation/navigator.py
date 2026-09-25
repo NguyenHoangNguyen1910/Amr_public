@@ -22,6 +22,8 @@ from .types import (
     transform_points,
 )
 
+_MINIMUM_YAW_PROGRESS_RAD = 0.02
+
 
 class Navigator:
     """One goal session; callers drive it by calling :meth:`step`."""
@@ -41,6 +43,8 @@ class Navigator:
         self.state = State.ERROR
         self.command = STOP
         self.anchor: Point2D | None = None
+        self.yaw_progress_anchor: float | None = None
+        self.yaw_progress_mode: str | None = None
         self.last_progress = 0.0
         self.stable_cycles = 0
         self.clearance_m: float | None = None
@@ -63,6 +67,8 @@ class Navigator:
         self.state = State.NAVIGATING
         self.command = STOP
         self.anchor = navigation_input.pose.to_point()
+        self.yaw_progress_anchor = None
+        self.yaw_progress_mode = None
         self.last_progress = time.monotonic() if now is None else now
         self.stable_cycles = 0
         self.clearance_m = None
@@ -80,8 +86,30 @@ class Navigator:
             and distance_to_goal <= self.config.goal_terminal_entry_m
         ):
             self.phase = GoalPhase.FINAL
-        elif self.phase is GoalPhase.FINAL and distance_to_goal > self.config.goal_terminal_exit_m:
+            yaw_progress = self._terminal_yaw_error(navigation_input.pose)
+            if yaw_progress is not None:
+                self.yaw_progress_mode, self.yaw_progress_anchor = yaw_progress
+        elif (
+            self.phase is GoalPhase.FINAL
+            and distance_to_goal > self.config.goal_terminal_exit_m
+        ):
             self.phase = GoalPhase.TRACKING
+            self.yaw_progress_anchor = None
+            self.yaw_progress_mode = None
+
+    def _terminal_yaw_error(self, pose: Pose2D) -> tuple[str, float] | None:
+        if self.goal is None:
+            return None
+        position = pose.to_point()
+        if distance(position, self.goal) > self.config.goal_tolerance_m:
+            target_yaw = math.atan2(self.goal.y - pose.y, self.goal.x - pose.x)
+            mode = "bearing"
+        elif self.goal.yaw is not None:
+            target_yaw = self.goal.yaw
+            mode = "goal"
+        else:
+            return None
+        return mode, abs(normalize_angle(target_yaw - pose.yaw))
 
     def _goal_is_stable(self, navigation_input: NavigationInput) -> bool:
         if self.goal is None:
@@ -155,15 +183,23 @@ class Navigator:
             )
             if headway:
                 self.anchor = position
-        else:
-            headway = False
-        if (
-            headway
-            or decision.escaping
-            or abs(self.command.angular) > 0.05
-            or self.command != STOP
-        ):
-            self.last_progress = now
+                self.last_progress = now
+        if self.phase is GoalPhase.FINAL:
+            yaw_progress = self._terminal_yaw_error(navigation_input.pose)
+            if yaw_progress is None:
+                self.yaw_progress_anchor = None
+                self.yaw_progress_mode = None
+            else:
+                yaw_mode, yaw_error = yaw_progress
+                if self.yaw_progress_mode != yaw_mode:
+                    self.yaw_progress_mode = yaw_mode
+                    self.yaw_progress_anchor = yaw_error
+                elif (
+                    self.yaw_progress_anchor is not None
+                    and self.yaw_progress_anchor - yaw_error >= _MINIMUM_YAW_PROGRESS_RAD
+                ):
+                    self.yaw_progress_anchor = yaw_error
+                    self.last_progress = now
         if now - self.last_progress > self.config.no_progress_timeout_seconds:
             self.command = STOP
             self.state = State.BLOCKED

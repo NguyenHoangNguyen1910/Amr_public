@@ -73,10 +73,11 @@ ros2 launch bringup web.launch.py \
   sim_initial_x:=-2.0 sim_initial_y:=-0.5 sim_initial_yaw:=0.0
 ```
 
-Reset robot ảo về pose ban đầu:
+Reset robot ảo về pose tùy chọn:
 
 ```bash
-ros2 service call /simulation/reset std_srvs/srv/Empty '{}'
+ros2 service call /simulation/reset bringup/srv/ResetSimulation \
+  '{x: 0.0, y: 0.0, yaw: 0.0}'
 ```
 
 ## Lưu map từ môi trường thật
@@ -114,6 +115,18 @@ ros2 launch bringup web.launch.py \
 
 Pose đầu phải nằm trong vùng free và cách vật cản ít nhất bán kính robot. Nếu
 không, adapter dừng ngay với lỗi rõ ràng thay vì đặt robot xuyên tường.
+
+Smoke test gồm 10 cặp start→goal cố định trên map `warehouse_a`. Mỗi trường
+hợp reset robot về đúng start `(x, y, yaw)`, sau đó gửi một goal
+`(x, y, yaw)`:
+
+```bash
+./smoke_simulation.sh
+```
+
+Smoke test tự chuyển arbiter sang mode `nav`, reset simulator trước mỗi case và
+trả lại mode `manual` khi kết thúc. Map mặc định là
+`/workspace/maps/warehouse_a.yaml`; có thể đổi bằng `SMOKE_MAP`.
 
 ## Dùng lại map cho robot thật
 

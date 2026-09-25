@@ -2,12 +2,26 @@
 set -Eeuo pipefail
 
 readonly SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
-readonly ROS_IMAGE="${ROS_IMAGE:-yahboomtechnology/ros-humble:4.0.3}"
+source "$SCRIPT_DIR/platform.sh"
 readonly WORKSPACE="$SCRIPT_DIR/ros"
+readonly PLATFORM_MARKER="$WORKSPACE/.robot_nav_platform"
 
 if ! command -v docker >/dev/null 2>&1; then
   echo "Error: docker is not installed or is not in PATH." >&2
   exit 1
+fi
+
+ensure_ros_image
+
+if [[ -d "$WORKSPACE/build" || -d "$WORKSPACE/install" || -d "$WORKSPACE/log" ]]; then
+  if [[ ! -f "$PLATFORM_MARKER" || "$(<"$PLATFORM_MARKER")" != "$ROS_PLATFORM" ]]; then
+    echo "Generated workspace files were built for another platform; cleaning them."
+    docker run --rm \
+      --platform "$ROS_PLATFORM" \
+      --volume "$WORKSPACE:/workspace" \
+      "$ROS_IMAGE" \
+      rm -rf /workspace/build /workspace/install /workspace/log
+  fi
 fi
 
 test -f "$WORKSPACE/src/robot_localization/package.xml"
@@ -18,6 +32,7 @@ echo "Build output: $WORKSPACE/build"
 echo "Install output: $WORKSPACE/install"
 
 docker run --rm \
+  --platform "$ROS_PLATFORM" \
   --cpus=1.0 \
   --memory=2304m \
   --memory-swap=2304m \
@@ -51,6 +66,7 @@ docker run --rm \
   '
 
 docker run --rm \
+  --platform "$ROS_PLATFORM" \
   --volume "$WORKSPACE:/workspace" \
   "$ROS_IMAGE" \
   rm -f /workspace/install/bringup/share/bringup/config/navigation.yaml
@@ -68,6 +84,8 @@ test -f "$WORKSPACE/install/bringup/share/bringup/maps/amr_world.json"
 test -f "$WORKSPACE/install/bringup/local/lib/python3.10/dist-packages/navigation/ros_adapter.py" || \
   test -f "$WORKSPACE/install/bringup/local/lib/python3.12/dist-packages/navigation/ros_adapter.py"
 test -f "$WORKSPACE/install/bringup/local/lib/python3.10/dist-packages/simulation/core.py" || \
-  test -f "$WORKSPACE/install/bringup/local/lib/python3.12/dist-packages/simulation/core.py"
+test -f "$WORKSPACE/install/bringup/local/lib/python3.12/dist-packages/simulation/core.py"
+
+printf '%s\n' "$ROS_PLATFORM" > "$PLATFORM_MARKER"
 
 echo "Build completed and required runtime files were found."
