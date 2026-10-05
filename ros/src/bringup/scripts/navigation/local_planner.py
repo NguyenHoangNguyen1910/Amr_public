@@ -46,6 +46,27 @@ class LocalPlanner:
     def __init__(self, cost_map: CostMap, config: NavigationConfig):
         self.cost_map = cost_map
         self.config = config
+        self.reset_terminal()
+
+    def reset_terminal(self) -> None:
+        self.aligning_goal_yaw = False
+        self._outside_goal_cycles = 0
+
+    def _update_terminal(self, pose: Pose2D, goal: Point2D) -> None:
+        if goal.yaw is None:
+            self.reset_terminal()
+            return
+        remaining = distance(pose.to_point(), goal)
+        if remaining <= self.config.goal_tolerance_m:
+            self.aligning_goal_yaw = True
+            self._outside_goal_cycles = 0
+        elif self.aligning_goal_yaw:
+            self._outside_goal_cycles += 1
+            # Debounce position recovery, not the success tolerance. A large
+            # displacement releases immediately; small fluctuations must persist.
+            if (remaining > self.config.goal_terminal_entry_m
+                    or self._outside_goal_cycles >= self.config.stable_goal_cycles):
+                self.reset_terminal()
 
     @staticmethod
     def _samples(low: float, high: float, count: int) -> tuple[float, ...]:
@@ -118,7 +139,7 @@ class LocalPlanner:
     def _terminal_command(self, pose: Pose2D, goal: Point2D) -> Velocity:
         config = self.config
         distance_to_goal = distance(pose.to_point(), goal)
-        if distance_to_goal > config.goal_tolerance_m:
+        if distance_to_goal > config.goal_tolerance_m and not self.aligning_goal_yaw:
             target_yaw = math.atan2(goal.y - pose.y, goal.x - pose.x)
             error = normalize_angle(target_yaw - pose.yaw)
             angular = max(
@@ -150,6 +171,11 @@ class LocalPlanner:
         self, pose: Pose2D, command: Velocity, obstacles: Sequence[Point2D]
     ) -> tuple[bool, float]:
         local, world = self._trajectories(pose, command)
+        return self._safe_trajectory(local, world, obstacles)
+
+    def _safe_trajectory(
+        self, local: Sequence[Pose2D], world: Sequence[Pose2D], obstacles: Sequence[Point2D]
+    ) -> tuple[bool, float]:
         if not self._map_safe(world):
             return False, 0.0
         clearance = min(min_distance(item.to_point(), obstacles) for item in local)
@@ -194,6 +220,7 @@ class LocalPlanner:
     ) -> ControlDecision:
         obstacles = self._obstacles(pose, obstacles_robot)
         if final:
+            self._update_terminal(pose, goal)
             command = self._terminal_command(pose, goal)
             safe, clearance = self._safe_command(pose, command, obstacles)
             return ControlDecision(
@@ -203,6 +230,7 @@ class LocalPlanner:
                 not self.cost_map.is_free(pose.to_point()),
             )
 
+        self.reset_terminal()
         position = pose.to_point()
         target = target_point(position, path, self.config.lookahead_distance_m)
         candidates: list[_Candidate] = []
@@ -210,10 +238,10 @@ class LocalPlanner:
         for linear in linear_samples:
             for angular in angular_samples:
                 command = Velocity(linear, angular)
-                safe, clearance = self._safe_command(pose, command, obstacles)
+                local, world = self._trajectories(pose, command)
+                safe, clearance = self._safe_trajectory(local, world, obstacles)
                 if not safe:
                     continue
-                _, world = self._trajectories(pose, command)
                 progress = progress_field.progress_m(position, world[-1].to_point())
                 candidates.append(
                     _Candidate(

@@ -22,6 +22,7 @@ install(
     scripts/web_bridge.py
     scripts/navigation_node.py
     scripts/simulation_adapter.py
+    scripts/imu_covariance_adapter.py
   DESTINATION lib/${PROJECT_NAME}
 )
 

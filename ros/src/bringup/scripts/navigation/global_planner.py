@@ -109,6 +109,20 @@ class CostMap:
         self._expires_at.fill(0.0)
         self._set_dynamic(np.zeros_like(self._dynamic))
 
+    def replace_static(self, static: OccupancyGrid, now: float) -> None:
+        """Keep unexpired observations in world coordinates when SLAM grows its map."""
+        expires_at = np.zeros(static.raw.shape)
+        for row, column in np.argwhere(self._expires_at > now):
+            cell = static.world_to_grid(self.static.grid_to_world((row, column)))
+            if static.contains_cell(cell) and not static.occupied[cell]:
+                expires_at[cell] = max(expires_at[cell], self._expires_at[row, column])
+        self.static = static
+        self.grid = static
+        self._expires_at = expires_at
+        self._dynamic = np.zeros(static.raw.shape, dtype=np.bool_)
+        self._set_dynamic(expires_at > now)
+        self.version += 1
+
     def _set_dynamic(self, dynamic: np.ndarray) -> None:
         if np.array_equal(dynamic, self._dynamic):
             return
@@ -236,11 +250,24 @@ class GlobalPlanner:
             raise PlanningError(code, f"no collision-free path to goal ({code})") from None
 
     def cost_to_go(self, point: Point2D) -> float:
-        cell = self.cost_map.grid.world_to_grid(point)
-        return (
-            float(self.costs[cell])
-            if self.cost_map.grid.contains_cell(cell)
-            else math.inf
+        grid = self.cost_map.grid
+        cell = grid.world_to_grid(point)
+        if not grid.contains_cell(cell):
+            return math.inf
+        cost = float(self.costs[cell])
+        if math.isfinite(cost) or grid.raw[cell] or not grid.occupied[cell]:
+            return cost
+        # plan() can connect a raw-free start inside inflation to a nearby
+        # reachable cell. Score that same escape consistently: otherwise even
+        # safe in-place turns get progress=-inf and lose to STOP on a tie.
+        # This only extends the score; LocalPlanner still validates every pose
+        # against occupancy, clearance and the current scan.
+        try:
+            reachable = self._reachable_cell(point)
+        except PlanningError:
+            return math.inf
+        return float(self.costs[reachable]) + (
+            distance(point, grid.grid_to_world(reachable)) / grid.resolution_m
         )
 
     def progress_m(self, start: Point2D, end: Point2D) -> float:

@@ -76,6 +76,13 @@ def generate_launch_description():
                 'launch', 'ekf.launch.py')),
             condition=hardware_backend),
         Node(
+            package='bringup',
+            executable='imu_covariance_adapter.py',
+            name='imu_covariance_adapter',
+            output='screen',
+            condition=hardware_backend,
+        ),
+        Node(
             package='tf2_ros',
             executable='static_transform_publisher',
             name='base_footprint_to_base_link',

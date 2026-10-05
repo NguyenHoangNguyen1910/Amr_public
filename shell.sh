@@ -48,14 +48,7 @@ if docker ps --format '{{.Names}}' | grep -Fxq "$ROS_CONTAINER"; then
   exec docker exec -it \
     --env="ROS_DOMAIN_ID=$ROS_DOMAIN_ID" \
     --env="ROS_LOCALHOST_ONLY=$ROS_LOCALHOST_ONLY" \
-    "$ROS_CONTAINER" bash -lc \
-    'source /opt/ros/humble/setup.bash &&
-     if [[ -f /root/imu_ws/install/imu_complementary_filter/share/imu_complementary_filter/package.bash ]]; then
-       source /root/imu_ws/install/imu_complementary_filter/share/imu_complementary_filter/package.bash
-     fi &&
-     source /workspace/install/robot_localization/share/robot_localization/package.bash &&
-     source /workspace/install/bringup/share/bringup/package.bash &&
-     exec bash -i'
+    "$ROS_CONTAINER" bash --rcfile /workspace/src/bringup/config/interactive.bash -i
 fi
 
 if [[ -n "${DISPLAY:-}" ]] && command -v xhost >/dev/null 2>&1; then
@@ -93,11 +86,5 @@ if [[ "$MODE" == "--background" ]]; then
   exit 0
 fi
 
-exec docker run -it --rm --platform "$ROS_PLATFORM" "${docker_args[@]}" "$ROS_IMAGE" bash -lc \
-  'source /opt/ros/humble/setup.bash &&
-   if [[ -f /root/imu_ws/install/imu_complementary_filter/share/imu_complementary_filter/package.bash ]]; then
-     source /root/imu_ws/install/imu_complementary_filter/share/imu_complementary_filter/package.bash
-   fi &&
-   source /workspace/install/robot_localization/share/robot_localization/package.bash &&
-   source /workspace/install/bringup/share/bringup/package.bash &&
-   exec bash -i'
+exec docker run -it --rm --platform "$ROS_PLATFORM" "${docker_args[@]}" "$ROS_IMAGE" \
+  bash --rcfile /workspace/src/bringup/config/interactive.bash -i

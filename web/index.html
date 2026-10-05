@@ -712,8 +712,9 @@
       const p = eventToCanvas(event), world = canvasToWorld(p.x, p.y);
       if (!world) return;
       if (state.interaction === 'goal') {
-        // Keep goal selection deliberately simple: position only, fixed yaw.
-        state.goal = {position: world, yaw: 0};
+        const robot = state.pose && state.pose.pose.position;
+        const yaw = robot ? Math.atan2(world.y - robot.y, world.x - robot.x) : 0;
+        state.goal = {position: world, yaw};
         state.dirty.overlay = true;
         updatePoseReadouts();
         updateGoButton();

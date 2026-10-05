@@ -2863,9 +2863,8 @@ bool RosFilter<T>::preparePose(
     "Final target frame for " << topic_name << " is " <<
       final_target_frame << "\n");
 
-  pose_tmp.stamp_ = tf2::timeFromSec(
-    static_cast<double>(msg->header.stamp.sec) +
-    static_cast<double>(msg->header.stamp.sec) / 1000000000.0);
+  const rclcpp::Time measurement_time(msg->header.stamp);
+  pose_tmp.stamp_ = tf2::TimePoint(std::chrono::nanoseconds(measurement_time.nanoseconds()));
 
   // Fill out the position data
   pose_tmp.setOrigin(
@@ -2913,7 +2912,7 @@ bool RosFilter<T>::preparePose(
   tf2::Transform target_frame_trans;
   bool can_transform = ros_filter_utilities::lookupTransformSafe(
     tf_buffer_.get(), final_target_frame, pose_tmp.frame_id_,
-    rclcpp::Time(tf2::timeToSec(pose_tmp.stamp_)), tf_timeout_,
+    measurement_time, tf_timeout_,
     target_frame_trans);
 
   // handling multiple odometry origins: convert to the origin adherent to base_link.
@@ -2923,7 +2922,7 @@ bool RosFilter<T>::preparePose(
   if (source_frame != base_link_frame_id_) {
     can_src_transform = ros_filter_utilities::lookupTransformSafe(
       tf_buffer_.get(), source_frame, base_link_frame_id_,
-      rclcpp::Time(tf2::timeToSec(pose_tmp.stamp_)), tf_timeout_,
+      measurement_time, tf_timeout_,
       source_frame_trans);
   }
 

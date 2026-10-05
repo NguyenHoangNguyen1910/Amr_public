@@ -32,7 +32,7 @@ ekf_filter_node:
 
 # If you're having trouble, try setting this to true, and then echo the /diagnostics_agg topic to see if the node is
 # unhappy with any settings or data.
-        print_diagnostics: false
+        print_diagnostics: true
 
 # Debug settings. Not for the faint of heart. Outputs a ludicrous amount of information to the file specified by
 # debug_out_file. I hope you like matrices! Please note that setting this to true will have strongly deleterious
@@ -89,10 +89,13 @@ ekf_filter_node:
 # do not provide some of the state variables estimated by the filter. For example, a TwistWithCovarianceStamped message
 # has no pose information, so the first six values would be meaningless in that case. Each vector defaults to all false
 # if unspecified, effectively making this parameter required for each sensor.
-        odom0_config: [true, true, false,
-                       false, false, true,
+# Encoder pose is integrated from the same velocities, and its odom_frame is
+# not the EKF odom frame. Fuse body-frame vx/vy only; do not invent an identity TF.
+# Heading rate comes from the gyro, not the conflicting wheel yaw estimate.
+        odom0_config: [false, false, false,
+                       false, false, false,
                        true, true, false,
-                       false, false, true,
+                       false, false, false,
                        false, false, false]
 
         #        [x_pos   , y_pos    , z_pos,
@@ -133,11 +136,13 @@ ekf_filter_node:
 # For messages that have both pose and twist data, the parameter specifies to which part of the message we are applying
 # the thresholds.
         odom0_pose_rejection_threshold: 20.0
-        odom0_twist_rejection_threshold: 1.542
+        odom0_twist_rejection_threshold: 8.0
 
-        imu0: /imu/data #/imu/data
+        imu0: /imu/data_cov
+# The complementary filter has no magnetometer: yaw is integrated gyro data,
+# not an independent absolute heading. Fuse gyro once, with explicit covariance.
         imu0_config: [false, false, false,
-                      false, false, true ,
+                      false, false, false,
                       false, false, false,
                       false, false, true,
                       false, false, false]
@@ -153,7 +158,7 @@ ekf_filter_node:
         imu0_relative: true
         imu0_queue_size: 10
         imu0_pose_rejection_threshold: 20.0                 # Note the difference in parameter names     # 0.8
-        imu0_twist_rejection_threshold: 1.542               # 0.8
+        imu0_twist_rejection_threshold: 8.0
         imu0_linear_acceleration_rejection_threshold: 10.0  #
 
 # [ADVANCED] Some IMUs automatically remove acceleration due to gravity, and others don't. If yours doesn't, please set
@@ -233,5 +238,4 @@ ekf_filter_node:
                                       0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,     0.0,     0.0,     1e-9,   0.0,    0.0,
                                       0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,     0.0,     0.0,     0.0,    1e-9,   0.0,
                                       0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,     0.0,     0.0,     0.0,    0.0,    1e-9]
-
 

@@ -44,6 +44,57 @@ using robot_localization::Ekf;
 using robot_localization::RosEkf;
 using robot_localization::STATE_SIZE;
 
+class PoseTimeTestFilter : public RosEkf
+{
+public:
+  explicit PoseTimeTestFilter(const rclcpp::NodeOptions & options) : RosEkf(options) {}
+  using RosEkf::preparePose;
+
+  void addTransform(const std::string & parent, const std::string & child,
+    uint32_t nanosec, double x)
+  {
+    geometry_msgs::msg::TransformStamped transform;
+    transform.header.frame_id = parent;
+    transform.child_frame_id = child;
+    transform.header.stamp.sec = 1791000000;
+    transform.header.stamp.nanosec = nanosec;
+    transform.transform.translation.x = x;
+    transform.transform.rotation.w = 1.0;
+    ASSERT_TRUE(tf_buffer_->setTransform(transform, "test", false));
+  }
+};
+
+TEST(EkfTest, PoseUsesMeasurementTimeForBothFrameTransforms) {
+  // At .500 s the interpolated transform is x=5; the latest is x=9.
+  // Looking up seconds as nanoseconds silently fell back to x=9 before the fix.
+  for (bool source_transform : {false, true}) {
+    rclcpp::NodeOptions options;
+    options.arguments({"ekf_pose_time_test"});
+    auto filter = std::make_shared<PoseTimeTestFilter>(options);
+    filter->initialize();
+    const std::string parent = source_transform ? "sensor_body" : "odom";
+    const std::string child = source_transform ? "base_link" : "sensor_world";
+    filter->addTransform(parent, child, 125000000, 1.0);
+    filter->addTransform(parent, child, 875000000, 9.0);
+    auto message = std::make_shared<geometry_msgs::msg::PoseWithCovarianceStamped>();
+    message->header.frame_id = source_transform ? "odom" : "sensor_world";
+    message->header.stamp.sec = 1791000000;
+    message->header.stamp.nanosec = 500000000;
+    message->pose.pose.orientation.w = 1.0;
+    for (int i = 0; i < 6; ++i) {
+      message->pose.covariance[i * 7] = 0.01;
+    }
+    std::vector<bool> update(STATE_SIZE, false);
+    update[0] = true;
+    Eigen::VectorXd measurement = Eigen::VectorXd::Zero(STATE_SIZE);
+    Eigen::MatrixXd covariance = Eigen::MatrixXd::Zero(STATE_SIZE, STATE_SIZE);
+    ASSERT_TRUE(filter->preparePose(message, "time_test", "odom",
+      source_transform ? "sensor_body" : "base_link", false, false, false,
+      update, measurement, covariance));
+    EXPECT_NEAR(measurement[0], 5.0, 1e-9);
+  }
+}
+
 TEST(EkfTest, Measurements) {
   rclcpp::NodeOptions options;
   options.arguments({"ekf_filter_node"});

@@ -174,20 +174,33 @@ class NavigationNode(Node):
 
     def _map_callback(self, message: RosOccupancyGrid) -> None:
         try:
+            if message.header.frame_id and message.header.frame_id != self.map_frame:
+                raise ValueError("map frame does not match the configured map frame")
             width = int(message.info.width)
             height = int(message.info.height)
-            resolution = float(message.info.resolution)
+            resolution = _finite(message.info.resolution, "map resolution")
             if width <= 0 or height <= 0 or resolution <= 0.0:
                 raise ValueError("map dimensions and resolution must be positive")
             if len(message.data) != width * height:
                 raise ValueError("map data length does not match map dimensions")
-        except (TypeError, ValueError) as error:
+        except (TypeError, ValueError, SensorDataError) as error:
             self.get_logger().warning(
                 f"Ignoring invalid occupancy map: {error}",
                 throttle_duration_sec=5.0,
             )
             return
         with self._mission_lock:
+            previous = self._latest_map
+            if (
+                previous is not None
+                and previous.header.frame_id == message.header.frame_id
+                and previous.info.width == message.info.width
+                and previous.info.height == message.info.height
+                and previous.info.resolution == message.info.resolution
+                and previous.info.origin == message.info.origin
+                and previous.data == message.data
+            ):
+                return  # A new timestamp alone does not require a new cost field.
             self._latest_map = message
 
     def _scan_callback(self, message: LaserScan) -> None:
@@ -367,20 +380,47 @@ class NavigationNode(Node):
                 goal_handle.canceled()
                 return NavigateToPose.Result()
             while not self._shutdown:
-                result = navigator.step(self.navigation_input())
-                self.publish_velocity(result.command.linear, result.command.angular)
-                self._publish_plan(result.path, goal_point.yaw)
+                cycle_start = time.monotonic()
                 if goal_handle.is_cancel_requested:
                     navigator.cancel()
                     goal_handle.canceled()
                     return NavigateToPose.Result()
+                with self._mission_lock:
+                    latest_map = self._latest_map
+                if latest_map is not map_message:
+                    if latest_map.header.frame_id and latest_map.header.frame_id != self.map_frame:
+                        raise SensorDataError("occupancy map is not in the configured map frame")
+                    navigator.update_map(occupancy_grid_from_ros(
+                        latest_map, self.config, self.occupied_threshold
+                    ))
+                    map_message = latest_map
+                result = navigator.step(self.navigation_input())
+                if goal_handle.is_cancel_requested:
+                    navigator.cancel()
+                    goal_handle.canceled()
+                    return NavigateToPose.Result()
+                if self._shutdown:
+                    break
+                self.publish_velocity(result.command.linear, result.command.angular)
+                self._publish_plan(result.path, goal_point.yaw)
                 if result.state is State.SUCCEEDED:
                     goal_handle.succeed()
                     return NavigateToPose.Result()
                 if result.state.value in _FAILED_STATES:
+                    remaining = math.hypot(goal_point.x - result.pose.x, goal_point.y - result.pose.y)
+                    yaw_error = (None if goal_point.yaw is None else
+                                 math.atan2(math.sin(goal_point.yaw - result.pose.yaw),
+                                            math.cos(goal_point.yaw - result.pose.yaw)))
+                    self.get_logger().error(
+                        f"Navigation aborted: {navigator.blocked_reason or result.state.value}; "
+                        f"phase={navigator.phase.value}, distance={remaining:.3f} m, "
+                        f"yaw_error_rad={yaw_error}, goal=({goal_point.x:.3f}, {goal_point.y:.3f}, "
+                        f"{goal_point.yaw}), pose=({result.pose.x:.3f}, {result.pose.y:.3f}, "
+                        f"{result.pose.yaw:.3f})"
+                    )
                     goal_handle.abort()
                     return NavigateToPose.Result()
-                time.sleep(1.0 / self.config.control_hz)
+                time.sleep(max(0.0, 1.0 / self.config.control_hz - (time.monotonic() - cycle_start)))
 
             navigator.cancel()
             goal_handle.canceled()
@@ -394,6 +434,7 @@ class NavigationNode(Node):
                 goal_handle.abort()
             return NavigateToPose.Result()
         finally:
+            self.publish_stop()
             self._publish_empty_plan()
             with self._mission_lock:
                 if self._active_navigator is navigator:

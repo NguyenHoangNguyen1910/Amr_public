@@ -14,12 +14,14 @@ from .types import (
     NavigationInput,
     NavigationResult,
     Point2D,
+    Pose2D,
     State,
     Velocity,
     SensorDataError,
     distance,
     normalize_angle,
     transform_points,
+    target_point,
 )
 
 _MINIMUM_YAW_PROGRESS_RAD = 0.02
@@ -45,9 +47,12 @@ class Navigator:
         self.anchor: Point2D | None = None
         self.yaw_progress_anchor: float | None = None
         self.yaw_progress_mode: str | None = None
+        self.tracking_yaw_target: Point2D | None = None
+        self.tracking_yaw_best: tuple[float, float] | None = None
         self.last_progress = 0.0
         self.stable_cycles = 0
         self.clearance_m: float | None = None
+        self.blocked_reason: str | None = None
 
     def plan(
         self,
@@ -60,6 +65,8 @@ class Navigator:
         if goal.yaw is not None and not math.isfinite(goal.yaw):
             raise ValueError("goal yaw must be finite")
         self.cost_map.clear_dynamic_obstacles()
+        self.local_planner.reset_terminal()
+        self.blocked_reason = None
         self.goal = goal
         self.planner = GlobalPlanner(self.cost_map, goal, self.config)
         self.path = self.planner.plan(navigation_input.pose.to_point())
@@ -69,6 +76,8 @@ class Navigator:
         self.anchor = navigation_input.pose.to_point()
         self.yaw_progress_anchor = None
         self.yaw_progress_mode = None
+        self.tracking_yaw_target = None
+        self.tracking_yaw_best = None
         self.last_progress = time.monotonic() if now is None else now
         self.stable_cycles = 0
         self.clearance_m = None
@@ -76,6 +85,39 @@ class Navigator:
     def cancel(self) -> None:
         self.command = STOP
         self.state = State.CANCELLED
+
+    def update_map(self, static_map: OccupancyGrid, now: float | None = None) -> None:
+        """Apply a new SLAM map without restarting the mission or its watchdog."""
+        if self.goal is None:
+            raise RuntimeError("plan() must be called before update_map()")
+        self.command = STOP
+        self.cost_map.replace_static(static_map, time.monotonic() if now is None else now)
+        try:
+            self.planner = GlobalPlanner(self.cost_map, self.goal, self.config)
+        except PlanningError:
+            self.state = State.BLOCKED
+            raise
+
+    def _tracking_yaw_progress(self, pose: Pose2D) -> bool:
+        # Freeze the bearing until actual translation makes progress. A changing
+        # path or an oscillating heading must not keep a stuck robot alive forever.
+        if self.tracking_yaw_target is None:
+            self.tracking_yaw_target = target_point(
+                pose.to_point(), self.path, self.config.lookahead_distance_m
+            )
+        target = self.tracking_yaw_target
+        bearing = math.atan2(target.y - pose.y, target.x - pose.x)
+        errors = (
+            abs(normalize_angle(bearing - pose.yaw)),
+            abs(normalize_angle(bearing - pose.yaw - math.pi)),
+        )
+        if self.tracking_yaw_best is None:
+            self.tracking_yaw_best = errors
+            return False
+        best = self.tracking_yaw_best
+        improved = tuple(old - new >= _MINIMUM_YAW_PROGRESS_RAD for old, new in zip(best, errors))
+        self.tracking_yaw_best = tuple(new if ok else old for old, new, ok in zip(best, errors, improved))
+        return any(improved)
 
     def _final_phase(self, navigation_input: NavigationInput) -> None:
         if self.goal is None:
@@ -101,7 +143,8 @@ class Navigator:
         if self.goal is None:
             return None
         position = pose.to_point()
-        if distance(position, self.goal) > self.config.goal_tolerance_m:
+        if (distance(position, self.goal) > self.config.goal_tolerance_m
+                and not self.local_planner.aligning_goal_yaw):
             target_yaw = math.atan2(self.goal.y - pose.y, self.goal.x - pose.x)
             mode = "bearing"
         elif self.goal.yaw is not None:
@@ -149,11 +192,10 @@ class Navigator:
         now = time.monotonic() if now is None else now
         self._final_phase(navigation_input)
         position = navigation_input.pose.to_point()
-        seen = (
-            transform_points(navigation_input.pose, navigation_input.obstacles_robot)
-            if self.cost_map.is_free(position)
-            else ()
-        )
+        # Inflation describes command safety, not whether an observation exists.
+        # Dropping scans inside inflation lets a still-visible obstacle expire,
+        # producing alternating move/stop commands at the obstacle TTL.
+        seen = transform_points(navigation_input.pose, navigation_input.obstacles_robot)
         try:
             self.cost_map.update_world_obstacles(seen, now)
             self.planner.refresh()
@@ -167,14 +209,20 @@ class Navigator:
                 self.goal,
                 self.phase is GoalPhase.FINAL,
             )
-        except (PlanningError, SensorDataError):
+        except (PlanningError, SensorDataError) as error:
             self.command = STOP
             self.clearance_m = None
+            self.stable_cycles = 0
+            self.blocked_reason = (
+                f"{error.code.value}: {error}" if isinstance(error, PlanningError)
+                else f"SENSOR_DATA: {error}"
+            )
             if now - self.last_progress > self.config.no_progress_timeout_seconds:
                 self.state = State.BLOCKED
             return self._result(navigation_input.pose)
 
         self.command = decision.command if decision.safe else STOP
+        self.blocked_reason = None if decision.safe else "UNSAFE_COMMAND: local collision check rejected motion"
         self.clearance_m = decision.clearance_m
         if self.anchor is not None:
             headway = (
@@ -184,6 +232,10 @@ class Navigator:
             if headway:
                 self.anchor = position
                 self.last_progress = now
+                self.tracking_yaw_target = None
+                self.tracking_yaw_best = None
+        if self.phase is GoalPhase.TRACKING and self._tracking_yaw_progress(navigation_input.pose):
+            self.last_progress = now
         if self.phase is GoalPhase.FINAL:
             yaw_progress = self._terminal_yaw_error(navigation_input.pose)
             if yaw_progress is None:
@@ -203,8 +255,11 @@ class Navigator:
         if now - self.last_progress > self.config.no_progress_timeout_seconds:
             self.command = STOP
             self.state = State.BLOCKED
+            if self.blocked_reason is None:
+                self.blocked_reason = "NO_PROGRESS: measured pose did not make sufficient progress"
 
-        if self.phase is GoalPhase.FINAL and self._goal_is_stable(navigation_input):
+        if (self.state is State.NAVIGATING and decision.safe
+                and self.phase is GoalPhase.FINAL and self._goal_is_stable(navigation_input)):
             self.stable_cycles += 1
             if self.stable_cycles >= self.config.stable_goal_cycles:
                 self.command = STOP

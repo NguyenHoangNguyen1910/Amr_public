@@ -12,7 +12,7 @@ class NavigationConfig:
     local_safety_margin_m: float = 0.03
     goal_tolerance_m: float = 0.12
     goal_terminal_entry_m: float = 0.20
-    goal_terminal_exit_m: float = 0.14
+    goal_terminal_exit_m: float = 0.30
     goal_yaw_tolerance_rad: float = 0.20
     stable_linear_velocity_mps: float = 0.02
     stable_angular_velocity_rps: float = 0.03
@@ -64,8 +64,8 @@ class NavigationConfig:
         )
         if any(value <= 0.0 for value in positive):
             raise ValueError("navigation configuration values must be positive")
-        if self.goal_terminal_exit_m > self.goal_terminal_entry_m:
-            raise ValueError("terminal exit distance must not exceed entry distance")
+        if self.goal_terminal_exit_m <= self.goal_terminal_entry_m:
+            raise ValueError("terminal exit distance must exceed entry distance")
         if self.linear_samples < 2 or self.angular_samples < 2:
             raise ValueError("dynamic window needs at least two samples per axis")
 

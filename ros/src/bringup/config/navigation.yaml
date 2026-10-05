@@ -18,7 +18,7 @@ navigation:
     local_safety_margin_m: 0.015           # Margin thêm khi kiểm tra LiDAR local.
     goal_tolerance_m: 0.06                 # Sai số vị trí tối đa để thành công.
     goal_terminal_entry_m: 0.30            # Vào terminal controller khi gần goal hơn mức này.
-    goal_terminal_exit_m: 0.08             # Rời terminal controller khi đi xa lại quá mức này.
+    goal_terminal_exit_m: 0.40             # Phải lớn hơn entry để không đảo chế độ liên tục.
     goal_yaw_tolerance_rad: 0.08           # Sai số hướng tối đa tại goal có yaw.
     terminal_linear_velocity_mps: 0.04     # Tốc độ tiến chậm khi căn goal cuối.
     terminal_angular_velocity_rps: 0.22    # Tốc độ quay tối đa khi căn goal cuối.
