@@ -79,12 +79,9 @@ test -x "$WORKSPACE/install/bringup/lib/bringup/camera_mjpeg.py"
 test -x "$WORKSPACE/install/bringup/lib/bringup/cmd_vel_arbiter.py"
 test -x "$WORKSPACE/install/bringup/lib/bringup/web_bridge.py"
 test -x "$WORKSPACE/install/bringup/lib/bringup/navigation_node.py"
-test -x "$WORKSPACE/install/bringup/lib/bringup/simulation_adapter.py"
-test -f "$WORKSPACE/install/bringup/share/bringup/maps/amr_world.json"
+test -x "$WORKSPACE/install/bringup/lib/bringup/imu_covariance_adapter.py"
 test -f "$WORKSPACE/install/bringup/local/lib/python3.10/dist-packages/navigation/ros_adapter.py" || \
   test -f "$WORKSPACE/install/bringup/local/lib/python3.12/dist-packages/navigation/ros_adapter.py"
-test -f "$WORKSPACE/install/bringup/local/lib/python3.10/dist-packages/simulation/core.py" || \
-test -f "$WORKSPACE/install/bringup/local/lib/python3.12/dist-packages/simulation/core.py"
 
 printf '%s\n' "$ROS_PLATFORM" > "$PLATFORM_MARKER"
 

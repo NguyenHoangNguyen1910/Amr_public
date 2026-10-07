@@ -1,10 +1,6 @@
 # AMR
 
-Mobile robot platform with ROS 2, navigation, and a web UI.
-
-The same stack can run against either the real robot or a headless 2D virtual
-robot. See [`docs/simulation.md`](docs/simulation.md) for backend switching and
-the saved-map workflow.
+Mobile robot platform with ROS 2, navigation, and a web UI for the real robot.
 
 ![AMR Web UI demo](docs/demo.jpg)
 
@@ -48,31 +44,12 @@ for the web topic details.
 
 ## Run the robot
 
-Default backend: `hardware`.
-
 ```bash
+./build.sh
 ./bootstrap.sh
 ./shell.sh
 ros2 launch bringup web.launch.py
 ```
-
-## Run without robot hardware
-
-```bash
-./build.sh
-ROBOT_BACKEND=simulation ./bootstrap.sh
-./shell.sh
-# ros2 launch bringup web.launch.py robot_backend:=simulation use_camera:=false
-ros2 launch bringup web.launch.py \
-    robot_backend:=simulation \
-    sim_map:=/workspace/maps/warehouse_a.yaml \
-    sim_initial_x:=0.005 \
-    sim_initial_y:=0.082 \
-    sim_initial_yaw:=0.001 \
-    use_camera:=false
-```
-
-Simulation uses the existing web UI and can load a saved robot map.
 
 ### Web UI
 
