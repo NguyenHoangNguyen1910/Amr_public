@@ -4,3 +4,16 @@ ros/install
 ros/log
 __pycache__
 *.pyc
+
+# Local tools and runtime output
+.venv
+.ruff_cache
+**/log
+**/logs
+**/.ros
+**/*.log
+**/*.log.*
+**/*.pid
+**/robot_localization_debug.txt
+**/dual_ekf_navsat_example_debug.txt
+tempCodeRunnerFile.*

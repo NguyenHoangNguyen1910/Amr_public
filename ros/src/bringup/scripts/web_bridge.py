@@ -120,7 +120,7 @@ class WebBridge(Node):
                 timeout=Duration(seconds=self.transform_timeout))
         except TransformException as error:
             self.dropped_scan_count += 1
-            self.get_logger().warn(
+            self.get_logger().warning(
                 'Dropping scan: no TF at source timestamp (%s), dropped=%d' %
                 (error, self.dropped_scan_count),
                 throttle_duration_sec=5.0,

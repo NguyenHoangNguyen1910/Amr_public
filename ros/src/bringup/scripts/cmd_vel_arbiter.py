@@ -76,7 +76,7 @@ class CmdVelArbiter(Node):
     def stop_callback(self, message):
         if message.data:
             self.emergency_stop = True
-            self.get_logger().warn('emergency stop latched')
+            self.get_logger().warning('emergency stop latched')
 
     def reset_callback(self, message):
         if message.data:

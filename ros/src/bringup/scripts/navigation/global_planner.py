@@ -289,8 +289,7 @@ class GlobalPlanner:
         else:
             raw.insert(0, start)
         raw[-1] = self.goal
-        path = resample_path(self._smooth(raw), self.config.waypoint_spacing_m)
-        return path
+        return resample_path(self._smooth(raw), self.config.waypoint_spacing_m)
 
     def _smooth(self, path: Sequence[Point2D]) -> tuple[Point2D, ...]:
         grid = self.cost_map.grid

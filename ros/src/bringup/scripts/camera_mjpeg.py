@@ -166,7 +166,7 @@ class CameraMjpeg(Node):
     def image_callback(self, message):
         if message.format and 'jpeg' not in message.format.lower() \
                 and 'jpg' not in message.format.lower():
-            self.get_logger().warn(
+            self.get_logger().warning(
                 'Expected JPEG CompressedImage, got format=%s' % message.format,
                 throttle_duration_sec=10.0,
             )
