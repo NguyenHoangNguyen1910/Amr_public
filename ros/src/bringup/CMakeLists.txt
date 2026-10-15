@@ -11,21 +11,28 @@ find_package(std_msgs REQUIRED)
 rosidl_generate_interfaces(${PROJECT_NAME}
   "action/NavigateToPose.action"
   "msg/ScanPoints.msg"
+  "srv/ResetSimulation.srv"
   DEPENDENCIES builtin_interfaces geometry_msgs std_msgs
 )
 
 install(
   PROGRAMS
     scripts/camera_mjpeg.py
+    scripts/depth_rtabmap_adapter.py
     scripts/cmd_vel_arbiter.py
     scripts/web_bridge.py
     scripts/navigation_node.py
+    scripts/simulation_adapter.py
     scripts/imu_covariance_adapter.py
   DESTINATION lib/${PROJECT_NAME}
 )
 
 ament_python_install_package(navigation
   PACKAGE_DIR scripts/navigation
+)
+
+ament_python_install_package(simulation
+  PACKAGE_DIR scripts/simulation
 )
 
 install(
@@ -35,7 +42,7 @@ install(
 )
 
 install(
-  DIRECTORY config
+  DIRECTORY config maps
   DESTINATION share/${PROJECT_NAME}
 )
 

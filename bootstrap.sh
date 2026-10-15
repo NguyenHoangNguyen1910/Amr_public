@@ -7,14 +7,47 @@ readonly ROS_CONTAINER="${ROS_CONTAINER:-yahboom-ros-main}"
 readonly SERIAL_DEVICE="${SERIAL_DEVICE:-/dev/ttyUSB0}"
 readonly SERIAL_BAUDRATE="${SERIAL_BAUDRATE:-921600}"
 readonly ROS_DOMAIN_ID="${ROS_DOMAIN_ID:-20}"
-readonly ROS_LOCALHOST_ONLY="${ROS_LOCALHOST_ONLY:-1}"
+# The micro-ROS agent must discover the ROS 2 nodes that run in the other
+# containers.  Localhost-only DDS prevents the base controller from matching
+# the backend's /cmd_vel publisher/subscriber graph on the robot.
+readonly ROS_LOCALHOST_ONLY="${ROS_LOCALHOST_ONLY:-0}"
 readonly AUTO_RESET="${AUTO_RESET:-1}"
+readonly ROBOT_BACKEND="${ROBOT_BACKEND:-hardware}"
 readonly SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/platform.sh"
 
 if ! command -v docker >/dev/null 2>&1; then
   echo "Error: docker is not installed or is not in PATH." >&2
   exit 1
+fi
+
+if [[ "$ROBOT_BACKEND" != "hardware" && "$ROBOT_BACKEND" != "simulation" ]]; then
+  echo "Error: ROBOT_BACKEND must be hardware or simulation." >&2
+  exit 2
+fi
+
+if docker ps --format '{{.Names}}' | grep -Fxq "$ROS_CONTAINER"; then
+  running_backend="$(docker inspect --format '{{range .Config.Env}}{{println .}}{{end}}' \
+    "$ROS_CONTAINER" | sed -n 's/^ROBOT_BACKEND=//p' | tail -n 1)"
+  running_backend="${running_backend:-hardware}"
+  if [[ "$running_backend" != "$ROBOT_BACKEND" ]]; then
+    echo "Error: $ROS_CONTAINER is already running with ROBOT_BACKEND=$running_backend." >&2
+    echo "Stop it before switching backend: docker stop $ROS_CONTAINER" >&2
+    exit 1
+  fi
+fi
+
+if [[ "$ROBOT_BACKEND" == "simulation" ]]; then
+  if docker ps --format '{{.Names}}' | grep -Fxq "$AGENT_CONTAINER"; then
+    echo "Error: $AGENT_CONTAINER is still connected to the real robot." >&2
+    echo "Stop it before simulation: docker stop $AGENT_CONTAINER" >&2
+    exit 1
+  fi
+  echo "Starting without robot hardware; the ROS simulation adapter will provide sensors and motion."
+  "$SCRIPT_DIR/shell.sh" --background
+  echo "Next: ./shell.sh"
+  echo "Then: ros2 launch bringup web.launch.py robot_backend:=simulation use_camera:=false"
+  exit 0
 fi
 
 if [[ ! -e "$SERIAL_DEVICE" ]]; then

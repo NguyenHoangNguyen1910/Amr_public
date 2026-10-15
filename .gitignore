@@ -25,22 +25,17 @@ log/
 **/.robot_nav_platform
 
 # Runtime logs and local configuration
-logs/
-.ros/
 *.log
-*.log.*
 *.pid
-robot_localization_debug.txt
-dual_ekf_navsat_example_debug.txt
 .env
 .env.*
 !.env.example
 
 # Generated maps and temporary files
+rtabmap_data/
 *.bag
 *.db3
 *.pdf
 *.yaml.bak
 *.swp
 *.tmp
-tempCodeRunnerFile.*

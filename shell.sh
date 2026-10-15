@@ -3,7 +3,9 @@ set -Eeuo pipefail
 
 readonly ROS_CONTAINER="${ROS_CONTAINER:-yahboom-ros-main}"
 readonly ROS_DOMAIN_ID="${ROS_DOMAIN_ID:-20}"
-readonly ROS_LOCALHOST_ONLY="${ROS_LOCALHOST_ONLY:-1}"
+readonly ROS_LOCALHOST_ONLY="${ROS_LOCALHOST_ONLY:-0}"
+readonly REQUESTED_BACKEND="${ROBOT_BACKEND:-}"
+readonly ROBOT_BACKEND="${ROBOT_BACKEND:-hardware}"
 readonly SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/platform.sh"
 readonly MODE="${1:-}"
@@ -29,6 +31,14 @@ if docker ps --format '{{.Names}}' | grep -Fxq "$ROS_CONTAINER"; then
     echo "Stop it before switching image: docker stop $ROS_CONTAINER" >&2
     exit 1
   fi
+  running_backend="$(docker inspect --format '{{range .Config.Env}}{{println .}}{{end}}' \
+    "$ROS_CONTAINER" | sed -n 's/^ROBOT_BACKEND=//p' | tail -n 1)"
+  running_backend="${running_backend:-hardware}"
+  if [[ -n "$REQUESTED_BACKEND" && "$running_backend" != "$ROBOT_BACKEND" ]]; then
+    echo "Error: $ROS_CONTAINER uses ROBOT_BACKEND=$running_backend, requested $ROBOT_BACKEND." >&2
+    echo "Stop it before switching backend: docker stop $ROS_CONTAINER" >&2
+    exit 1
+  fi
   if [[ "$MODE" == "--background" ]]; then
     echo "Yahboom ROS container is already running: $ROS_CONTAINER"
     exit 0
@@ -49,20 +59,24 @@ docker_args=(
   --name "$ROS_CONTAINER"
   --privileged=true
   --net=host
+  --ipc=host
   --env="DISPLAY=${DISPLAY:-:0}"
   --env="QT_X11_NO_MITSHM=1"
   --env="ROS_DOMAIN_ID=$ROS_DOMAIN_ID"
   --env="ROS_LOCALHOST_ONLY=$ROS_LOCALHOST_ONLY"
+  --env="ROBOT_BACKEND=$ROBOT_BACKEND"
   -v /tmp/.X11-unix:/tmp/.X11-unix
   --security-opt apparmor:unconfined
   -v "$SCRIPT_DIR/ros/src:/workspace/src"
   -v "$SCRIPT_DIR/maps:/workspace/maps"
 )
 
-docker_args+=(
-  -v /dev/input:/dev/input
-  -v /dev/video0:/dev/video0
-)
+if [[ "$ROBOT_BACKEND" == "hardware" ]]; then
+  docker_args+=(
+    -v /dev/input:/dev/input
+    -v /dev/video0:/dev/video0
+  )
+fi
 
 docker_args+=(-v "$SCRIPT_DIR/ros/install/bringup:/workspace/install/bringup")
 docker_args+=(-v "$SCRIPT_DIR/ros/install/robot_localization:/workspace/install/robot_localization:ro")

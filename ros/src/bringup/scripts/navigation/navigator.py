@@ -16,6 +16,7 @@ from .types import (
     Point2D,
     Pose2D,
     State,
+    Velocity,
     SensorDataError,
     distance,
     normalize_angle,
@@ -180,52 +181,6 @@ class Navigator:
             self.clearance_m,
         )
 
-    def _record_progress(self, pose: Pose2D, position: Point2D, now: float) -> None:
-        if self.anchor is not None:
-            headway = (
-                self.planner.progress_m(self.anchor, position)
-                >= self.config.minimum_progress_m
-            )
-            if headway:
-                self.anchor = position
-                self.last_progress = now
-                self.tracking_yaw_target = None
-                self.tracking_yaw_best = None
-        if self.phase is GoalPhase.TRACKING and self._tracking_yaw_progress(pose):
-            self.last_progress = now
-        if self.phase is GoalPhase.FINAL:
-            yaw_progress = self._terminal_yaw_error(pose)
-            if yaw_progress is None:
-                self.yaw_progress_anchor = None
-                self.yaw_progress_mode = None
-            else:
-                yaw_mode, yaw_error = yaw_progress
-                if self.yaw_progress_mode != yaw_mode:
-                    self.yaw_progress_mode = yaw_mode
-                    self.yaw_progress_anchor = yaw_error
-                elif (
-                    self.yaw_progress_anchor is not None
-                    and self.yaw_progress_anchor - yaw_error >= _MINIMUM_YAW_PROGRESS_RAD
-                ):
-                    self.yaw_progress_anchor = yaw_error
-                    self.last_progress = now
-
-    def _update_state(self, navigation_input: NavigationInput, safe: bool, now: float) -> None:
-        if now - self.last_progress > self.config.no_progress_timeout_seconds:
-            self.command = STOP
-            self.state = State.BLOCKED
-            if self.blocked_reason is None:
-                self.blocked_reason = "NO_PROGRESS: measured pose did not make sufficient progress"
-
-        if (self.state is State.NAVIGATING and safe
-                and self.phase is GoalPhase.FINAL and self._goal_is_stable(navigation_input)):
-            self.stable_cycles += 1
-            if self.stable_cycles >= self.config.stable_goal_cycles:
-                self.command = STOP
-                self.state = State.SUCCEEDED
-        else:
-            self.stable_cycles = 0
-
     def step(
         self, navigation_input: NavigationInput, now: float | None = None
     ) -> NavigationResult:
@@ -269,6 +224,46 @@ class Navigator:
         self.command = decision.command if decision.safe else STOP
         self.blocked_reason = None if decision.safe else "UNSAFE_COMMAND: local collision check rejected motion"
         self.clearance_m = decision.clearance_m
-        self._record_progress(navigation_input.pose, position, now)
-        self._update_state(navigation_input, decision.safe, now)
+        if self.anchor is not None:
+            headway = (
+                self.planner.progress_m(self.anchor, position)
+                >= self.config.minimum_progress_m
+            )
+            if headway:
+                self.anchor = position
+                self.last_progress = now
+                self.tracking_yaw_target = None
+                self.tracking_yaw_best = None
+        if self.phase is GoalPhase.TRACKING and self._tracking_yaw_progress(navigation_input.pose):
+            self.last_progress = now
+        if self.phase is GoalPhase.FINAL:
+            yaw_progress = self._terminal_yaw_error(navigation_input.pose)
+            if yaw_progress is None:
+                self.yaw_progress_anchor = None
+                self.yaw_progress_mode = None
+            else:
+                yaw_mode, yaw_error = yaw_progress
+                if self.yaw_progress_mode != yaw_mode:
+                    self.yaw_progress_mode = yaw_mode
+                    self.yaw_progress_anchor = yaw_error
+                elif (
+                    self.yaw_progress_anchor is not None
+                    and self.yaw_progress_anchor - yaw_error >= _MINIMUM_YAW_PROGRESS_RAD
+                ):
+                    self.yaw_progress_anchor = yaw_error
+                    self.last_progress = now
+        if now - self.last_progress > self.config.no_progress_timeout_seconds:
+            self.command = STOP
+            self.state = State.BLOCKED
+            if self.blocked_reason is None:
+                self.blocked_reason = "NO_PROGRESS: measured pose did not make sufficient progress"
+
+        if (self.state is State.NAVIGATING and decision.safe
+                and self.phase is GoalPhase.FINAL and self._goal_is_stable(navigation_input)):
+            self.stable_cycles += 1
+            if self.stable_cycles >= self.config.stable_goal_cycles:
+                self.command = STOP
+                self.state = State.SUCCEEDED
+        else:
+            self.stable_cycles = 0
         return self._result(navigation_input.pose)

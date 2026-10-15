@@ -70,6 +70,15 @@
     }
     .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; box-shadow: var(--shadow); }
     .map-panel { padding: .8rem; }
+    .map-heading {
+      align-items: baseline;
+      display: flex;
+      flex-wrap: wrap;
+      gap: .35rem .8rem;
+      margin: .1rem .1rem .65rem;
+    }
+    .map-heading h1 { font-size: 1.15rem; margin: 0; }
+    .map-state { color: var(--muted); font-size: .88rem; }
     .toolbar {
       align-items: center;
       display: flex;
@@ -260,6 +269,10 @@
 
   <main class="app">
     <section class="panel map-panel">
+      <div class="map-heading">
+        <h1>Map 2D</h1>
+        <span id="mapStatus" class="map-state">Đang chờ map từ RTAB-Map</span>
+      </div>
       <div class="toolbar">
         <button id="setGoal">Set Goal</button>
         <button id="goButton" class="primary" disabled>GO</button>
@@ -308,7 +321,7 @@
           <img id="camera" alt="USB camera">
         </section>
       </div>
-      <p id="mapHint" class="map-hint" role="status" aria-live="polite">Bấm Set Goal để chọn điểm B.</p>
+      <p id="mapHint" class="map-hint" role="status" aria-live="polite">Đang chờ map 2D từ RTAB-Map.</p>
       <div class="legend">
         <span><i class="robot"></i>Robot</span>
         <span><i class="scan"></i>LiDAR</span>
@@ -485,6 +498,17 @@
         cos: Math.cos(yaw),
         yaw
       };
+    }
+    function updateMapStatus(map) {
+      const info = map.info || {};
+      const width = Number(info.width) || 0;
+      const height = Number(info.height) || 0;
+      const resolution = Number(info.resolution);
+      const frame = map.header && map.header.frame_id ? map.header.frame_id : '—';
+      const resolutionText = Number.isFinite(resolution) ? resolution.toFixed(3) + ' m/cell' : '—';
+      $('mapStatus').textContent = width && height
+        ? `${width}×${height} · ${resolutionText} · frame ${frame}`
+        : 'Map 2D không hợp lệ';
     }
     function worldToCanvas(x, y) {
       const transform = state.mapTransform;
@@ -758,11 +782,13 @@
     bulkRos.subscribe('/web/map', 'nav_msgs/msg/OccupancyGrid', msg => {
       state.map = msg;
       updateMapTransform(msg);
+      updateMapStatus(msg);
       state.dirty.map = true;
       state.dirty.scan = true;
       state.dirty.path = true;
       state.dirty.overlay = true;
       markSensor('map');
+      $('mapHint').textContent = 'Map 2D đã sẵn sàng. Bấm Set Goal để chọn điểm B.';
       scheduleRender();
     }, 500);
     realtimeRos.subscribe('/robot_pose', 'geometry_msgs/msg/PoseStamped', msg => {

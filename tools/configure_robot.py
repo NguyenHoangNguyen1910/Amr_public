@@ -1,14 +1,14 @@
-import struct
-import threading
-import time
-
 import serial
+import struct
+import time
+import threading
 
 """
 ORDER 用来存放命令地址和对应数据
 ORDER is used to store the command address and corresponding data
 """
 ORDER = {
+    
     "WIFI_SSID": [0x01],
     "WIFI_PASSWD": [0x02],
     "AGENT_IP": [0x03, 0, 0, 0, 0],
@@ -29,7 +29,8 @@ ORDER = {
 }
 
 
-class MicroROS_Robot:
+class MicroROS_Robot():
+
     def __init__(self, port="/dev/ttyUSB0", debug=False):
         self.__ser = serial.Serial(port, 115200, timeout=0.05)
         self.__rx_FLAG = 0
@@ -51,33 +52,49 @@ class MicroROS_Robot:
         self.CAR_TYPE_COMPUTER = 0
         self.CAR_TYPE_RPI5 = 1
 
+
     def __send(self, key, len=1):
-        tx = [self.__HEAD, self.__DEVICE_ID, len + 5, ORDER[key][0]]
-        tx.extend(ORDER[key][1 + i] for i in range(len))
-        tx.append(sum(tx) % 256)
+        order = ORDER[key][0]
+        value = []
+        value_sum = 0
+        for i in range(0, len):
+            value.append(ORDER[key][1 + i])
+            value_sum = value_sum + ORDER[key][1 + i]
+        sum_data = (self.__HEAD + self.__DEVICE_ID + (len + 0x05) + order + value_sum) % 256
+        tx = [self.__HEAD, self.__DEVICE_ID, (len + 0x05), order]
+        tx.extend(value)
+        tx.append(sum_data)
         self.__ser.write(tx)
         if self.__send_delay > 0:
             time.sleep(self.__send_delay)
         if self.__debug:
             print ("Send: [0x" + ', 0x'.join('{:02X}'.format(x) for x in tx) + "]")
+            # print ("Send: [" + ' '.join('{:02X}'.format(x) for x in tx) + "]")
 
     def __request(self, addr, param=0):
-        tx = [self.__HEAD, self.__DEVICE_ID, 7, self.__READ_DATA, addr, param]
-        tx.append(sum(tx) % 256)
-        self.__ser.reset_input_buffer()
-        self.__ser.reset_output_buffer()
-        self.__rx_DATA[:] = bytes(self.__RX_BUF_LEN_MAX)
+        order = self.__READ_DATA
+        buf_len = 7
+        sum_data = (self.__HEAD + self.__DEVICE_ID + buf_len + order + addr + param) % 256
+        tx = [self.__HEAD, self.__DEVICE_ID, buf_len, order, addr, param, sum_data]
+        self.__ser.flushInput()
+        self.__ser.flushOutput()
+        for i in range(self.__RX_BUF_LEN_MAX):
+            self.__rx_DATA[i] = 0
         self.__ser.write(tx)
         if self.__debug:
             print ("Read: [0x" + ', 0x'.join('{:02X}'.format(x) for x in tx) + "]")
+            # print ("Read: [" + ' '.join('{:02X}'.format(x) for x in tx) + "]")
 
     def __unpack(self):
-        n = self.__ser.in_waiting
+        n = self.__ser.inWaiting()
         rx_CHECK = 0
         if n:
+            #print("OK")
             data_array = self.__ser.read_all()
             if self.__debug:
+                # print("rx_data:", list(data_array))
                 print ("rx_data: [0x" + ', 0x'.join('{:02X}'.format(x) for x in data_array) + "]")
+                # print ("rx_data: [" + ' '.join('{:02X}'.format(x) for x in data_array) + "]")
             for data in data_array:
                 if self.__rx_FLAG == 0:
                     if data == self.__HEAD:
@@ -108,7 +125,8 @@ class MicroROS_Robot:
                         self.__rx_FLAG = 5
 
                 elif self.__rx_FLAG == 5:
-                    rx_CHECK += sum(self.__rx_DATA)
+                    for i in self.__rx_DATA:
+                        rx_CHECK = rx_CHECK + i
                     rx_CHECK = (self.__HEAD + self.__RETURN_ID + self.__rx_LEN + self.__rx_ADDR + rx_CHECK) % 256
                     if data == rx_CHECK:
                         self.__rx_FLAG = 0
@@ -121,6 +139,7 @@ class MicroROS_Robot:
                         self.__rx_LEN = 0
         return False
 
+
     # 恢复出厂配置
     def reset_factory_config(self):
         ORDER["RESET_CONFIG"][1] = 0x5F
@@ -128,11 +147,12 @@ class MicroROS_Robot:
         self.__send("RESET_CONFIG", len=2)
 
     # 重启设备
-    def reboot_device(self):
+    def reboot_device(self):    
         ORDER["REBOOT_DEVICE"][1] = 0x5F
         ORDER["REBOOT_DEVICE"][2] = 0x5F
         self.__send("REBOOT_DEVICE", len=2)
-
+    
+    
     def set_wifi_config(self, ssid, passwd):
         """
         配置WiFi信息, 输入WiFi信号名称和密码。重启生效
@@ -161,14 +181,19 @@ class MicroROS_Robot:
         ORDER["AGENT_PORT"][2] = int(port>>8)&0xFF
         self.__send("AGENT_PORT", len=2)
 
+
     def set_ros_serial_baudrate(self, baudrate):
         '''
         配置ROS串口通讯波特率。重启生效
         输入参数示例: baudrate=115200
         '''
-        ORDER["SERIAL_BAUDRATE"][1:5] = struct.pack("i", int(baudrate))
+        value_s = bytearray(struct.pack('i', int(baudrate)))
+        ORDER["SERIAL_BAUDRATE"][1] = value_s[0]
+        ORDER["SERIAL_BAUDRATE"][2] = value_s[1]
+        ORDER["SERIAL_BAUDRATE"][3] = value_s[2]
+        ORDER["SERIAL_BAUDRATE"][4] = value_s[3]
         self.__send("SERIAL_BAUDRATE", len=4)
-
+    
     def set_ros_namespace(self, ros_namespace):
         """
         配置ROS命名空间。重启生效
@@ -184,6 +209,7 @@ class MicroROS_Robot:
             ORDER["ROS_NAMESPACE"].append(0)
         self.__send("ROS_NAMESPACE", len=name_len)
 
+
     def set_car_type(self, car_type):
         '''
         配置代理方式。重启生效
@@ -192,6 +218,7 @@ class MicroROS_Robot:
         ORDER["CAR_TYPE"][1] = int(car_type) & 0xFF
         ORDER["CAR_TYPE"][2] = 0
         self.__send("CAR_TYPE", len=2)
+
 
     def set_ros_domain_id(self, domain_id):
         '''
@@ -202,8 +229,11 @@ class MicroROS_Robot:
             domain_id = 100
         if domain_id < 0:
             domain_id = 0
-        ORDER["DOMAIN_ID"][1:3] = struct.pack("h", int(domain_id))
+        value_s = bytearray(struct.pack('h', int(domain_id)))
+        ORDER["DOMAIN_ID"][1] = value_s[0]
+        ORDER["DOMAIN_ID"][2] = value_s[1]
         self.__send("DOMAIN_ID", len=2)
+
 
     def set_pwm_servo_offset(self, servo_id, offset):
         '''
@@ -215,138 +245,231 @@ class MicroROS_Robot:
         ORDER["SERVO_OFFSET"][2] = int(offset) & 0xFF
         self.__send("SERVO_OFFSET", len=2)
 
+
+
     def set_motor_pid_parm(self, pid_p, pid_i, pid_d):
         '''
         设置电机PID参数。
         pid参数取值范围: [0.00, 10.00]
         '''
-        self.__set_pid("MOTOR_PID", pid_p, pid_i, pid_d)
+        pid_p_s = bytearray(struct.pack('h', int(pid_p*100)))
+        pid_i_s = bytearray(struct.pack('h', int(pid_i*100)))
+        pid_d_s = bytearray(struct.pack('h', int(pid_d*100)))
+        ORDER["MOTOR_PID"][1] = pid_p_s[0]
+        ORDER["MOTOR_PID"][2] = pid_p_s[1]
+        ORDER["MOTOR_PID"][3] = pid_i_s[0]
+        ORDER["MOTOR_PID"][4] = pid_i_s[1]
+        ORDER["MOTOR_PID"][5] = pid_d_s[0]
+        ORDER["MOTOR_PID"][6] = pid_d_s[1]
+        self.__send("MOTOR_PID", len=6)
 
     def set_imu_yaw_pid_parm(self, pid_p, pid_i, pid_d):
         '''
         设置IMU YAW PID参数。
         pid参数取值范围: [0.00, 10.00]
         '''
-        self.__set_pid("IMU_YAW_PID", pid_p, pid_i, pid_d)
-
-    def __set_pid(self, key, pid_p, pid_i, pid_d):
-        ORDER[key][1:7] = b"".join(
-            struct.pack("h", int(value * 100)) for value in (pid_p, pid_i, pid_d)
-        )
-        self.__send(key, len=6)
-
-    def __read(self, key, decode):
-        self.__request(ORDER[key][0])
-        time.sleep(self.__read_delay)
-        if self.__unpack():
-            return decode(self.__rx_DATA)
-
-    def __read_pid(self, key):
-        return self.__read(
-            key, lambda data: "%.2f, %.2f, %.2f" % tuple(
-                value / 100.0 for value in struct.unpack_from("hhh", data)
-            )
-        )
+        pid_p_s = bytearray(struct.pack('h', int(pid_p*100)))
+        pid_i_s = bytearray(struct.pack('h', int(pid_i*100)))
+        pid_d_s = bytearray(struct.pack('h', int(pid_d*100)))
+        ORDER["IMU_YAW_PID"][1] = pid_p_s[0]
+        ORDER["IMU_YAW_PID"][2] = pid_p_s[1]
+        ORDER["IMU_YAW_PID"][3] = pid_i_s[0]
+        ORDER["IMU_YAW_PID"][4] = pid_i_s[1]
+        ORDER["IMU_YAW_PID"][5] = pid_d_s[0]
+        ORDER["IMU_YAW_PID"][6] = pid_d_s[1]
+        self.__send("IMU_YAW_PID", len=6)
+    
 
     def read_wifi_ssid(self):
         '''
         读取底板连接的WiFi信号名称
         '''
-        return self.__read("WIFI_SSID", bytearray.decode)
+        self.__request(ORDER["WIFI_SSID"][0])
+        time.sleep(self.__read_delay)
+        str_data = None
+        if self.__unpack():
+            str_data = self.__rx_DATA.decode('utf-8')
+        return str_data
 
     def read_wifi_passwd(self):
         '''
         读取底板连接的WiFi密码
         '''
-        return self.__read("WIFI_PASSWD", bytearray.decode)
+        self.__request(ORDER["WIFI_PASSWD"][0])
+        time.sleep(self.__read_delay)
+        str_data = None
+        if self.__unpack():
+            str_data = self.__rx_DATA.decode('utf-8')
+        return str_data
 
     def read_agent_ip_addr(self):
         '''
         读取底板WiFi代理的IP地址
         '''
-        return self.__read("AGENT_IP", lambda data: "%d.%d.%d.%d" % tuple(data[:4]))
+        self.__request(ORDER["AGENT_IP"][0])
+        time.sleep(self.__read_delay)
+        str_data = None
+        if self.__unpack():
+            str_data = "%d.%d.%d.%d" % (self.__rx_DATA[0], self.__rx_DATA[1], self.__rx_DATA[2], self.__rx_DATA[3])
+        return str_data
 
     def read_agent_ip_port(self):
         '''
         读取底板WiFi代理的IP端口
         '''
-        return self.__read("AGENT_PORT", lambda data: "%d" % struct.unpack_from("h", data)[0])
+        self.__request(ORDER["AGENT_PORT"][0])
+        time.sleep(self.__read_delay)
+        str_data = None
+        if self.__unpack():
+            port = struct.unpack('h', bytearray(self.__rx_DATA[0:2]))[0]
+            str_data = "%d" % (port)
+        return str_data
 
     def read_car_type(self):
         '''
         读取底板小车类型、代理连接方式。
         '''
-        agent = self.__read("CAR_TYPE", lambda data: struct.unpack_from("h", data)[0])
-        if agent is None:
-            return None
-        if agent == self.CAR_TYPE_COMPUTER:
-            return "CAR_TYPE_COMPUTER"
-        if agent == self.CAR_TYPE_RPI5:
-            return "CAR_TYPE_RPI5"
-        return "unknow"
+        self.__request(ORDER["CAR_TYPE"][0])
+        time.sleep(self.__read_delay)
+        str_data = None
+        if self.__unpack():
+            agent = struct.unpack('h', bytearray(self.__rx_DATA[0:2]))[0]
+            if agent == self.CAR_TYPE_COMPUTER:
+                str_data = "CAR_TYPE_COMPUTER"
+            elif agent == self.CAR_TYPE_RPI5:
+                str_data = "CAR_TYPE_RPI5"
+            else:
+                str_data = "unknow"
+        return str_data
 
     def read_ros_domain_id(self):
         '''
         读取底板ROS DOMAIN ID
         '''
-        return self.__read("DOMAIN_ID", lambda data: "%d" % struct.unpack_from("h", data)[0])
+        self.__request(ORDER["DOMAIN_ID"][0])
+        time.sleep(self.__read_delay)
+        str_data = None
+        if self.__unpack():
+            domain_id = struct.unpack('h', bytearray(self.__rx_DATA[0:2]))[0]
+            str_data = "%d" % (domain_id)
+        return str_data
+
 
     def read_ros_serial_baudrate(self):
         '''
         读取底板ROS串口通讯波特率
         '''
-        return self.__read("SERIAL_BAUDRATE", lambda data: "%d" % struct.unpack_from("i", data)[0])
-
+        self.__request(ORDER["SERIAL_BAUDRATE"][0])
+        time.sleep(self.__read_delay)
+        str_data = None
+        if self.__unpack():
+            baudrate = struct.unpack('i', bytearray(self.__rx_DATA[0:4]))[0]
+            str_data = "%d" % (baudrate)
+        return str_data
+    
     def read_ros_namespace(self):
         '''
         读取底板的ROS命名空间
         '''
-        return self.__read("ROS_NAMESPACE", bytearray.decode)
+        self.__request(ORDER["ROS_NAMESPACE"][0])
+        time.sleep(self.__read_delay)
+        str_data = None
+        if self.__unpack():
+            str_data = self.__rx_DATA.decode('utf-8')
+        return str_data
 
     def read_pwm_servo_offset(self):
         '''
         读取底板PWM舵机偏差角度
         '''
-        return self.__read("SERVO_OFFSET", lambda data: "%d, %d" % struct.unpack_from("bb", data))
+        self.__request(ORDER["SERVO_OFFSET"][0])
+        time.sleep(self.__read_delay)
+        str_data = None
+        if self.__unpack():
+            offset_s1 = struct.unpack('b', bytearray(self.__rx_DATA[0:1]))[0]
+            offset_s2 = struct.unpack('b', bytearray(self.__rx_DATA[1:2]))[0]
+            str_data = "%d, %d" % (offset_s1, offset_s2)
+        return str_data
 
     def read_motor_pid_parm(self):
         '''
         读取底板电机PID参数
         '''
-        return self.__read_pid("MOTOR_PID")
+        self.__request(ORDER["MOTOR_PID"][0])
+        time.sleep(self.__read_delay)
+        str_data = None
+        if self.__unpack():
+            pid_p = struct.unpack('h', bytearray(self.__rx_DATA[0:2]))[0]/100.0
+            pid_i = struct.unpack('h', bytearray(self.__rx_DATA[2:4]))[0]/100.0
+            pid_d = struct.unpack('h', bytearray(self.__rx_DATA[4:6]))[0]/100.0
+            str_data = "%.2f, %.2f, %.2f" % (pid_p, pid_i, pid_d)
+        return str_data
 
     def read_imu_yaw_pid_parm(self):
         '''
         读取底板IMU YAW PID参数
         '''
-        return self.__read_pid("IMU_YAW_PID")
+        self.__request(ORDER["IMU_YAW_PID"][0])
+        time.sleep(self.__read_delay)
+        str_data = None
+        if self.__unpack():
+            pid_p = struct.unpack('h', bytearray(self.__rx_DATA[0:2]))[0]/100.0
+            pid_i = struct.unpack('h', bytearray(self.__rx_DATA[2:4]))[0]/100.0
+            pid_d = struct.unpack('h', bytearray(self.__rx_DATA[4:6]))[0]/100.0
+            str_data = "%.2f, %.2f, %.2f" % (pid_p, pid_i, pid_d)
+        return str_data
+
 
     def read_version(self):
         '''
         返回固件版本
         Return the firmware version
         '''
-        return self.__read("FIRMWARE_VERSION", lambda data: "%d.%d.%d" % tuple(data[:3]))
+        self.__request(ORDER["FIRMWARE_VERSION"][0])
+        time.sleep(self.__read_delay)
+        str_version = None
+        if self.__unpack():
+            str_version = "%d.%d.%d" % (self.__rx_DATA[0], self.__rx_DATA[1], self.__rx_DATA[2])
+        return str_version
+
 
     def print_all_firmware_parm(self):
-        for label, read in (
-            ("version:", self.read_version),
-            ("ssid:", self.read_wifi_ssid),
-            ("passwd:", self.read_wifi_passwd),
-            ("ip_addr:", self.read_agent_ip_addr),
-            ("ip_port:", self.read_agent_ip_port),
-            ("car_type:", self.read_car_type),
-            ("domain_id:", self.read_ros_domain_id),
-            ("ros_serial_baudrate:", self.read_ros_serial_baudrate),
-            ("ros_namespace:", self.read_ros_namespace),
-            ("servo_offset:", self.read_pwm_servo_offset),
-            ("motor pid parm:", self.read_motor_pid_parm),
-            ("imu yaw pid parm:", self.read_imu_yaw_pid_parm),
-        ):
-            print(label, read())
+        version = self.read_version()
+        print("version:", version)
+
+        ssid = self.read_wifi_ssid()
+        print("ssid:", ssid)
+        passwd = self.read_wifi_passwd()
+        print("passwd:", passwd)
+
+        ip_addr = self.read_agent_ip_addr()
+        print("ip_addr:", ip_addr)
+        ip_port = self.read_agent_ip_port()
+        print("ip_port:", ip_port)
+
+        car_type = self.read_car_type()
+        print("car_type:", car_type)
+
+        domain_id = self.read_ros_domain_id()
+        print("domain_id:", domain_id)
+
+        baudrate = self.read_ros_serial_baudrate()
+        print("ros_serial_baudrate:", baudrate)
+
+        ros_namespace = self.read_ros_namespace()
+        print("ros_namespace:", ros_namespace)
+
+        servo_offset = self.read_pwm_servo_offset()
+        print("servo_offset:", servo_offset)
+
+        motor_pid_parm = self.read_motor_pid_parm()
+        print("motor pid parm:", motor_pid_parm)
+
+        imu_pid_parm = self.read_imu_yaw_pid_parm()
+        print("imu yaw pid parm:", imu_pid_parm)
 
     def __print_rx_data(self):
-        self.__ser.reset_input_buffer()
+        self.__ser.flushInput()
         while self.__rx_debug:
             line = self.__ser.readline()
             if len(line) > 0:
@@ -358,14 +481,17 @@ class MicroROS_Robot:
 
     def start_rx_debug_task(self):
         self.__rx_debug = True
-        threading.Thread(
-            target=self.__print_rx_data, name="task_serial_receive", daemon=True
-        ).start()
+        name1 = "task_serial_receive"
+        task_receive = threading.Thread(target=self.__print_rx_data, name=name1, daemon=True)
+        task_receive.start()
 
 
 if __name__ == '__main__':
     robot = MicroROS_Robot(port='/dev/ttyUSB0', debug=False)
 
+    #robot.set_wifi_config("yahboom2", "yahboom890729")
+    #robot.set_udp_config([192, 168, 2, 103], 8090)
+    #robot.set_car_type(robot.CAR_TYPE_COMPUTER)
     robot.set_car_type(robot.CAR_TYPE_RPI5)
     robot.set_ros_domain_id(20)
     robot.set_ros_serial_baudrate(921600)
@@ -379,5 +505,11 @@ if __name__ == '__main__':
     robot.print_all_firmware_parm()
     print("Please reboot the device to take effect, if you change some device config.")
 
+    try:
+        while False:
+            # robot.beep(100)
+            time.sleep(1)
+    except:
+        pass
     time.sleep(.1)
     del robot

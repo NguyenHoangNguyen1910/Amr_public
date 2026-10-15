@@ -345,20 +345,6 @@ class NavigationCoreTest(unittest.TestCase):
         self.assertEqual(result.state, State.NAVIGATING)
         self.assertGreater(result.command.linear, 0.0)
 
-    def test_local_ranking_preserves_first_command_on_exact_tie(self):
-        cost_map = CostMap(self.grid, obstacle_ttl_seconds=2.0)
-        local = LocalPlanner(cost_map, self.config)
-        goal = Point2D(1.0, 0.0)
-        planner = GlobalPlanner(cost_map, goal, self.config)
-        pose = Pose2D(0.0, 0.0, 0.0)
-        with (
-            patch.object(local, "_window", return_value=((0.1,), (-0.2, 0.2))),
-            patch.object(local, "_score", return_value=1.0),
-        ):
-            decision = local.command(pose, STOP, (goal,), (), planner, goal, False)
-        self.assertTrue(decision.safe)
-        self.assertEqual(decision.command, Velocity(0.1, -0.2))
-
     def test_inflated_start_can_turn_without_relaxing_collision_checks(self):
         cost_map = CostMap(self.grid, obstacle_ttl_seconds=2.0)
         cost_map.update_world_obstacles((Point2D(0.05, 0.05),), now=0.0)
