@@ -142,17 +142,3 @@ RTABMAP_DATABASE_NAME=astra_wheel_mapping_new.db ./rtabmap.sh
 Các file `.pgm/.yaml` cũ trong `maps/` là map tĩnh của ROS và không tự động
 được cập nhật từ database RTAB-Map. Luồng web hiện hiển thị trực tiếp
 `/rtabmap/map` thông qua `/web/map`.
-
-## Camera depth qua WebSocket
-
-Giao diện nhận JPEG nhị phân từ `ws://<IP-robot>:8081/camera.ws`, có
-`permessage-deflate`. Camera không dùng chung rosbridge cổng 9090.
-Ảnh depth, độ phân giải và JPEG quality được giữ nguyên.
-
-Sau khi cập nhật code, chạy `./build.sh`. Script tự tạo image mặc định mới
-có `python3-aiohttp` cho AMD64 hoặc ARM64. Với container ROS đang chạy từ
-image cũ, dừng container đó trước khi chạy lại `./shell.sh`, rồi khởi động
-`ros2 launch bringup web.launch.py` và tải lại trang web.
-Nếu tự đặt `ROS_IMAGE`, image đó phải có `python3-aiohttp`.
-
-Xem [cách kiểm tra WebSocket compression](docs/web_topics.md#camera-depth-websocket).

@@ -318,7 +318,7 @@
           <canvas id="overlayCanvas" width="640" height="480" aria-label="Map interaction layer"></canvas>
         </div>
         <section class="panel camera-overlay">
-          <img id="camera" alt="Depth camera">
+          <img id="camera" alt="USB camera">
         </section>
       </div>
       <p id="mapHint" class="map-hint" role="status" aria-live="polite">Đang chờ map 2D từ RTAB-Map.</p>
@@ -391,70 +391,6 @@
       }
     }
 
-    // One JPEG per binary message. The browser negotiates and decompresses
-    // permessage-deflate; keep at most one pending image while decoding.
-    class CameraStream {
-      constructor(element, url, onFrame = () => {}) {
-        this.element = element;
-        this.url = url;
-        this.onFrame = onFrame;
-        this.stopped = false;
-        this.pending = null;
-        this.loadingUrl = null;
-        this.displayUrl = null;
-        this.retry = null;
-        this.connect();
-      }
-      connect() {
-        if (this.stopped) return;
-        const socket = this.socket = new WebSocket(this.url);
-        socket.binaryType = 'blob';
-        socket.onopen = () => {
-          this.element.dataset.wsCompression = socket.extensions;
-        };
-        socket.onmessage = event => {
-          if (this.stopped || this.socket !== socket || !(event.data instanceof Blob)) return;
-          this.pending = event.data;
-          this.render();
-        };
-        socket.onerror = () => socket.close();
-        socket.onclose = () => {
-          if (!this.stopped && this.socket === socket) {
-            this.retry = setTimeout(() => this.connect(), 2000);
-          }
-        };
-      }
-      render() {
-        if (this.stopped || this.loadingUrl || !this.pending) return;
-        const url = URL.createObjectURL(this.pending);
-        this.pending = null;
-        this.loadingUrl = url;
-        this.element.onload = () => {
-          if (this.displayUrl) URL.revokeObjectURL(this.displayUrl);
-          this.displayUrl = url;
-          this.loadingUrl = null;
-          this.onFrame();
-          this.render();
-        };
-        this.element.onerror = () => {
-          URL.revokeObjectURL(url);
-          this.loadingUrl = null;
-          this.render();
-        };
-        this.element.src = url;
-      }
-      close() {
-        this.stopped = true;
-        clearTimeout(this.retry);
-        this.socket.close();
-        this.element.onload = this.element.onerror = null;
-        this.pending = null;
-        if (this.loadingUrl) URL.revokeObjectURL(this.loadingUrl);
-        if (this.displayUrl) URL.revokeObjectURL(this.displayUrl);
-        this.loadingUrl = this.displayUrl = null;
-      }
-    }
-
     const state = {
       interaction: 'none', map: null, pose: null, scan: null,
       scanSequence: 0,
@@ -477,8 +413,8 @@
     const rosUrl = (location.protocol === 'https:' ? 'wss://' : 'ws://') + location.hostname + ':9090';
     const realtimeRos = new RosBridge(rosUrl, setConnection);
     const bulkRos = new RosBridge(rosUrl);
-    const cameraUrl = (location.protocol === 'https:' ? 'wss://' : 'ws://')
-      + location.hostname + ':8081/camera.ws';
+    const cameraUrl = (location.protocol === 'https:' ? 'https://' : 'http://')
+      + location.hostname + ':8081/camera.mjpg';
     const cameraHealthUrl = (location.protocol === 'https:' ? 'https://' : 'http://')
       + location.hostname + ':8081/healthz';
 
@@ -901,7 +837,7 @@
       }
       catch (_) {}
     }, 0);
-    const cameraStream = new CameraStream($('camera'), cameraUrl, () => markSensor('camera'));
+    $('camera').src = cameraUrl;
     checkCameraHealth();
     setInterval(checkCameraHealth, 2000);
     setInterval(() => {
@@ -910,7 +846,6 @@
       }
     }, 100);
     window.addEventListener('beforeunload', () => {
-      cameraStream.close();
       realtimeRos.publish('/web/cmd_vel_manual', 'geometry_msgs/msg/Twist', zeroTwist());
       realtimeRos.publish('/web/cancel_navigation', 'std_msgs/msg/Empty', {});
     });

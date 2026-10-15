@@ -18,7 +18,7 @@ URL tại web/index.html:581, đồng thời dùng chung `bulkRos` với map và
 Đã triển khai:
 
 - Frontend không còn subscribe camera qua rosbridge.
-- `camera_mjpeg.py` phục vụ JPEG nhị phân qua `/camera.ws` với `permessage-deflate`; endpoint MJPEG cũ vẫn dùng được.
+- `camera_mjpeg.py` phục vụ JPEG mới nhất qua HTTP `/camera.mjpg`.
 - Camera không còn đi chung WebSocket với map, LiDAR và navigation.
 
 ### 2. Chỉ gửi map khi thay đổi — đã triển khai

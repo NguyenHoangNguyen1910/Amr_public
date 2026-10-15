@@ -37,9 +37,9 @@ if [[ -n "${ROS_IMAGE:-}" ]]; then
 else
   readonly ROS_IMAGE_IS_AUTOMATIC=1
   if [[ "$ROS_PLATFORM" == "linux/amd64" ]]; then
-    readonly ROS_IMAGE="robot_nav/ros-humble:amd64-camera-ws"
+    readonly ROS_IMAGE="robot_nav/ros-humble:amd64"
   else
-    readonly ROS_IMAGE="robot_nav/ros-humble:arm64-camera-ws"
+    readonly ROS_IMAGE="yahboomtechnology/ros-humble:4.0.3"
   fi
 fi
 
@@ -54,16 +54,6 @@ ensure_ros_image() {
       --platform "$ROS_PLATFORM" \
       --tag "$ROS_IMAGE" \
       --file "$ROBOT_NAV_ROOT/Dockerfile.amd64" \
-      "$ROBOT_NAV_ROOT"
-    return 0
-  fi
-
-  if [[ "$ROS_IMAGE_IS_AUTOMATIC" == "1" && "$ROS_PLATFORM" == "linux/arm64" ]]; then
-    echo "ARM ROS image with camera WebSocket support is missing; building $ROS_IMAGE."
-    docker build \
-      --platform "$ROS_PLATFORM" \
-      --tag "$ROS_IMAGE" \
-      --file "$ROBOT_NAV_ROOT/Dockerfile.camera" \
       "$ROBOT_NAV_ROOT"
     return 0
   fi

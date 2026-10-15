@@ -1,7 +1,0 @@
-ARG ROS_BASE_IMAGE=yahboomtechnology/ros-humble:4.0.3
-FROM ${ROS_BASE_IMAGE}
-
-# Keep the vendor's ARM runtime and add the camera WebSocket transport.
-RUN apt-get update \
-  && apt-get install -y --no-install-recommends python3-aiohttp \
-  && rm -rf /var/lib/apt/lists/*
