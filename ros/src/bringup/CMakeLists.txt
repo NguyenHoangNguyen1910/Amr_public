@@ -27,6 +27,8 @@ install(
   DESTINATION lib/${PROJECT_NAME}
 )
 
+install(FILES scripts/camera_stream.py DESTINATION lib/${PROJECT_NAME})
+
 ament_python_install_package(navigation
   PACKAGE_DIR scripts/navigation
 )

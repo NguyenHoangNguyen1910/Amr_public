@@ -22,10 +22,10 @@ Nếu trang được phục vụ qua HTTPS, frontend dùng `wss://` thay cho `ws
 | `realtimeRos` | Pose robot, LiDAR packed và trạng thái navigation |
 | `bulkRos` | Map và path |
 
-Camera được phục vụ riêng qua HTTP MJPEG tại:
+Camera depth dùng WebSocket nhị phân riêng, thương lượng `permessage-deflate` tại:
 
 ```text
-http://<hostname>:8081/camera.mjpg
+ws://<hostname>:8081/camera.ws
 ```
 
 Frontend kiểm tra trạng thái camera mỗi 2 giây qua
@@ -159,12 +159,26 @@ Các trạng thái được frontend xử lý:
 
 Frontend không tự tính khoảng cách robot-goal. Việc robot đã tới goal được xác định qua `state = "SUCCEEDED"` từ topic này.
 
-### Camera MJPEG
+### Camera depth WebSocket
 
-Node `ros/src/bringup/scripts/camera_mjpeg.py` subscribe
-`/usb_cam/image_raw/compressed`, giữ lại frame JPEG mới nhất và phục vụ
-multipart HTTP tại `/camera.mjpg`. Frontend dùng trực tiếp URL này trong thẻ
-`<img>`, nên ảnh camera không đi qua rosbridge hoặc hai WebSocket của UI.
+Node `ros/src/bringup/scripts/camera_mjpeg.py` mặc định subscribe
+`/camera/depth/image_raw`, chuyển depth thành JPEG màu một lần cho mỗi frame.
+`camera_stream.py` gửi mỗi JPEG trong một binary WebSocket message tại
+`/camera.ws`, bật `permessage-deflate` (RFC 7692). Trình duyệt tự thương lượng
+và giải nén; frontend hiển thị Blob trong thẻ `<img>` và thu hồi object URL.
+Không dùng JSON/base64 cho camera. Độ phân giải, khoảng depth 600–6000 mm,
+JPEG quality 80 và tần suất xử lý ảnh giữ nguyên.
+
+Mỗi client chỉ giữ frame chờ mới nhất. Frontend tự kết nối lại sau 2 giây
+nếu socket đóng và không tạo hàng đợi ảnh khi giải mã chậm.
+`/camera.mjpg` và `/healthz` vẫn được hỗ trợ cho client cũ.
+
+Kiểm tra trong DevTools → Network → WS → `camera.ws`: phản hồi handshake
+phải có `Sec-WebSocket-Extensions: permessage-deflate...`; mục Messages
+hiển thị binary. Có thể xem extension đã thương lượng bằng
+`document.getElementById('camera').dataset.wsCompression`.
+Trang HTTPS dùng `wss://` và cần proxy TLS cho cổng 8081 như luồng HTTPS cũ.
+JPEG vốn đã nén nên không cam kết giảm băng thông hoặc latency nhờ deflate.
 
 ## Các topic publish
 
