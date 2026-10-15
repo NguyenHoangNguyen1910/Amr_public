@@ -305,7 +305,7 @@
           <canvas id="overlayCanvas" width="640" height="480" aria-label="Map interaction layer"></canvas>
         </div>
         <section class="panel camera-overlay">
-          <img id="camera" alt="USB camera">
+          <canvas id="camera" width="320" height="240" aria-label="Depth camera"></canvas>
         </section>
       </div>
       <p id="mapHint" class="map-hint" role="status" aria-live="polite">Bấm Set Goal để chọn điểm B.</p>
@@ -400,10 +400,18 @@
     const rosUrl = (location.protocol === 'https:' ? 'wss://' : 'ws://') + location.hostname + ':9090';
     const realtimeRos = new RosBridge(rosUrl, setConnection);
     const bulkRos = new RosBridge(rosUrl);
-    const cameraUrl = (location.protocol === 'https:' ? 'https://' : 'http://')
-      + location.hostname + ':8081/camera.mjpg';
-    const cameraHealthUrl = (location.protocol === 'https:' ? 'https://' : 'http://')
-      + location.hostname + ':8081/healthz';
+    const depthSocketUrl = (location.protocol === 'https:' ? 'wss://' : 'ws://')
+      + location.hostname + ':8082/ws/depth';
+    const depthCanvas = document.getElementById('camera');
+    const depthContext = depthCanvas.getContext('2d');
+    const depth = {
+      socket: null,
+      reconnectTimer: null,
+      width: 320,
+      height: 240,
+      imageData: null,
+      palette: null
+    };
 
     function $(id) { return document.getElementById(id); }
     function setConnection(ok) {
@@ -463,11 +471,64 @@
       $('sensorSummary').dataset.tooltip = status;
       $('sensorSummary').title = status;
     }
-    async function checkCameraHealth() {
-      try {
-        const response = await fetch(cameraHealthUrl, {cache: 'no-store'});
-        if (response.ok && (await response.json()).ready) markSensor('camera');
-      } catch (_) {}
+    function createDepthPalette() {
+      const stops = [[255, 0, 0], [255, 255, 0], [0, 255, 0],
+        [0, 0, 255], [0, 0, 0]];
+      const palette = new Uint8Array(256 * 3);
+      for (let value = 1; value < 256; value += 1) {
+        const position = ((value - 1) / 254) * (stops.length - 1);
+        const low = Math.floor(position);
+        const high = Math.min(low + 1, stops.length - 1);
+        const fraction = position - low;
+        const offset = value * 3;
+        for (let channel = 0; channel < 3; channel += 1) {
+          palette[offset + channel] = Math.round(
+            stops[low][channel] * (1 - fraction)
+              + stops[high][channel] * fraction);
+        }
+      }
+      return palette;
+    }
+    function renderDepthFrame(values) {
+      if (!depth.imageData || values.length !== depth.width * depth.height) return;
+      const pixels = depth.imageData.data;
+      for (let index = 0; index < values.length; index += 1) {
+        const value = values[index];
+        const pixel = index * 4;
+        const palette = value * 3;
+        pixels[pixel] = depth.palette[palette] || 0;
+        pixels[pixel + 1] = depth.palette[palette + 1] || 0;
+        pixels[pixel + 2] = depth.palette[palette + 2] || 0;
+        pixels[pixel + 3] = 255;
+      }
+      depthContext.putImageData(depth.imageData, 0, 0);
+      markSensor('camera');
+    }
+    function connectDepth() {
+      const socket = new WebSocket(depthSocketUrl);
+      socket.binaryType = 'arraybuffer';
+      depth.socket = socket;
+      socket.onmessage = event => {
+        if (typeof event.data === 'string') {
+          const metadata = JSON.parse(event.data);
+          depth.width = Number(metadata.width);
+          depth.height = Number(metadata.height);
+          depthCanvas.width = depth.width;
+          depthCanvas.height = depth.height;
+          depth.imageData = depthContext.createImageData(depth.width, depth.height);
+          return;
+        }
+        renderDepthFrame(new Uint8Array(event.data));
+      };
+      socket.onerror = () => socket.close();
+      socket.onclose = () => {
+        if (depth.reconnectTimer === null) {
+          depth.reconnectTimer = window.setTimeout(() => {
+            depth.reconnectTimer = null;
+            connectDepth();
+          }, 1000);
+        }
+      };
     }
 
     function updateMapTransform(map) {
@@ -811,9 +872,8 @@
       }
       catch (_) {}
     }, 0);
-    $('camera').src = cameraUrl;
-    checkCameraHealth();
-    setInterval(checkCameraHealth, 2000);
+    depth.palette = createDepthPalette();
+    connectDepth();
     setInterval(() => {
       if (!state.navigationActive && state.keyboardActive && state.manualCommand) {
         realtimeRos.publish('/web/cmd_vel_manual', 'geometry_msgs/msg/Twist', state.manualCommand);

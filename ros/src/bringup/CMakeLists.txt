@@ -17,6 +17,7 @@ rosidl_generate_interfaces(${PROJECT_NAME}
 install(
   PROGRAMS
     scripts/camera_mjpeg.py
+    scripts/astra_bridge.py
     scripts/cmd_vel_arbiter.py
     scripts/web_bridge.py
     scripts/navigation_node.py

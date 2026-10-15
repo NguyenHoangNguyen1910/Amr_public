@@ -22,14 +22,15 @@ Nếu trang được phục vụ qua HTTPS, frontend dùng `wss://` thay cho `ws
 | `realtimeRos` | Pose robot, LiDAR packed và trạng thái navigation |
 | `bulkRos` | Map và path |
 
-Camera được phục vụ riêng qua HTTP MJPEG tại:
+Depth camera được phục vụ riêng qua binary WebSocket tại:
 
 ```text
-http://<hostname>:8081/camera.mjpg
+ws://<hostname>:8082/ws/depth
 ```
 
-Frontend kiểm tra trạng thái camera mỗi 2 giây qua
-`http://<hostname>:8081/healthz`.
+WebSocket gửi metadata JSON một lần, sau đó gửi binary `uint8-depth` kích thước
+320×240. Browser tô màu frame trên canvas theo cùng thang màu với `read.py`.
+Server bật `permessage-deflate`; browser tự negotiate extension này.
 
 ## Các topic subscribe
 
@@ -159,12 +160,20 @@ Các trạng thái được frontend xử lý:
 
 Frontend không tự tính khoảng cách robot-goal. Việc robot đã tới goal được xác định qua `state = "SUCCEEDED"` từ topic này.
 
-### Camera MJPEG
+### Astra depth WebSocket
 
-Node `ros/src/bringup/scripts/camera_mjpeg.py` subscribe
-`/usb_cam/image_raw/compressed`, giữ lại frame JPEG mới nhất và phục vụ
-multipart HTTP tại `/camera.mjpg`. Frontend dùng trực tiếp URL này trong thẻ
-`<img>`, nên ảnh camera không đi qua rosbridge hoặc hai WebSocket của UI.
+Node `ros/src/bringup/scripts/astra_bridge.py` đọc Astra bằng OpenNI2, publish
+hai topic raw:
+
+```text
+/camera/color/image_raw   sensor_msgs/msg/Image, rgb8
+/camera/depth/image_raw   sensor_msgs/msg/Image, 16UC1
+```
+
+Cùng node này giữ frame depth preview mới nhất và phục vụ
+`/ws/depth` trên port `8082`. Payload binary là một byte/pixel; giá trị `0`
+là pixel không hợp lệ, còn các giá trị `1..255` được UI map sang màu đỏ-vàng-
+xanh-lam-đen.
 
 ## Các topic publish
 

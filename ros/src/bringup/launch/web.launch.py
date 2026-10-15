@@ -28,8 +28,11 @@ def generate_launch_description():
 
     return LaunchDescription([
         DeclareLaunchArgument(
-            'use_camera', default_value='true',
-            description='Start USB camera'),
+            'use_camera', default_value='false',
+            description='Start legacy USB camera'),
+        DeclareLaunchArgument(
+            'use_astra', default_value='true',
+            description='Start Astra RGB/depth bridge'),
         DeclareLaunchArgument(
             'slam_mode', default_value='mapping',
             description='slam_toolbox mode: mapping or localization',
@@ -143,5 +146,12 @@ def generate_launch_description():
             name='camera_mjpeg',
             output='screen',
             condition=camera_enabled,
+        ),
+        Node(
+            package='bringup',
+            executable='astra_bridge.py',
+            name='astra_bridge',
+            output='screen',
+            condition=IfCondition(LaunchConfiguration('use_astra')),
         ),
     ])

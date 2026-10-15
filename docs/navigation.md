@@ -117,7 +117,7 @@ Vai trò:
 | `ros/src/bringup/launch/web.launch.py` | Khởi chạy navigation node duy nhất |
 | `ros/src/bringup/CMakeLists.txt` | Cài executable, Python package và config SLAM |
 | `ros/src/bringup/package.xml` | Khai báo Python/NumPy và các ROS dependency trực tiếp của navigation node |
-| `build.sh` | Kiểm tra executable và module đã được cài đúng |
+| `shell.sh build` | Kiểm tra executable và module đã được cài đúng |
 | `README.md` | Cập nhật topology và lệnh chạy navigation |
 | `docs/web_topics.md` | Ghi rõ navigation node publish `/plan` và nhận goal qua local action |
 
@@ -452,7 +452,7 @@ Chỉ tăng tốc hoặc tune DWA sau khi các case dừng an toàn đã pass.
 Build:
 
 ```bash
-./build.sh
+./shell.sh build
 ```
 
 Chạy navigation backend:
