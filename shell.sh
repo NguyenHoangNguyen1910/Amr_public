@@ -113,7 +113,10 @@ rtabmap() {
       fi
       return
     fi
-    docker rm -f "$RTABMAP_CONTAINER" >/dev/null
+    if docker ps --format '{{.Names}}' | grep -Fxq "$RTABMAP_CONTAINER"; then
+      docker stop "$RTABMAP_CONTAINER" >/dev/null
+    fi
+    docker rm "$RTABMAP_CONTAINER" >/dev/null
   fi
   docker run -d --name "$RTABMAP_CONTAINER" --restart unless-stopped \
     --network host --ipc host \
