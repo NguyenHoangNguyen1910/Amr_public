@@ -37,6 +37,7 @@ dual_ekf_navsat_example_debug.txt
 !.env.example
 
 # Generated maps and temporary files
+rtabmap_data/
 *.bag
 *.db3
 *.pdf

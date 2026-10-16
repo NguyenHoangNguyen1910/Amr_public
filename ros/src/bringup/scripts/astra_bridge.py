@@ -14,7 +14,7 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
 from rclpy.qos import qos_profile_sensor_data
-from sensor_msgs.msg import Image
+from sensor_msgs.msg import CameraInfo, Image
 from primesense import openni2
 
 
@@ -30,6 +30,8 @@ class AstraBridge(Node):
         self.declare_parameter('camera_width', 320)
         self.declare_parameter('camera_height', 240)
         self.declare_parameter('camera_fps', 30)
+        self.declare_parameter(
+            'camera_info_topic', '/camera/color/camera_info')
         self.declare_parameter('preview_width', 320)
         self.declare_parameter('preview_height', 240)
         self.declare_parameter('max_depth_m', 5.0)
@@ -45,6 +47,8 @@ class AstraBridge(Node):
             self.get_parameter('camera_height').value))
         self.camera_fps = max(1, int(
             self.get_parameter('camera_fps').value))
+        self.camera_info_topic = str(
+            self.get_parameter('camera_info_topic').value)
         self.preview_width = max(1, int(
             self.get_parameter('preview_width').value))
         self.preview_height = max(1, int(
@@ -56,6 +60,8 @@ class AstraBridge(Node):
             Image, '/camera/color/image_raw', qos_profile_sensor_data)
         self.depth_pub = self.create_publisher(
             Image, '/camera/depth/image_raw', qos_profile_sensor_data)
+        self.camera_info_pub = self.create_publisher(
+            CameraInfo, self.camera_info_topic, qos_profile_sensor_data)
 
         self._frame_lock = threading.Lock()
         self._depth_preview_data = None
@@ -72,6 +78,7 @@ class AstraBridge(Node):
         self._set_video_mode(self.depth, openni2.PIXEL_FORMAT_DEPTH_1_MM)
         self.color.start()
         self.depth.start()
+        self.camera_info = self._make_camera_info()
 
         for _ in range(10):
             self.color.read_frame()
@@ -103,6 +110,28 @@ class AstraBridge(Node):
         mode.fps = self.camera_fps
         mode.pixelFormat = pixel_format
         stream.set_video_mode(mode)
+
+    def _make_camera_info(self):
+        horizontal_fov = float(self.color.get_horizontal_fov())
+        vertical_fov = float(self.color.get_vertical_fov())
+        if horizontal_fov <= 0.0 or vertical_fov <= 0.0:
+            raise RuntimeError('Astra returned invalid camera FOV')
+
+        fx = self.camera_width / (2.0 * np.tan(horizontal_fov / 2.0))
+        fy = self.camera_height / (2.0 * np.tan(vertical_fov / 2.0))
+        cx = (self.camera_width - 1) / 2.0
+        cy = (self.camera_height - 1) / 2.0
+
+        info = CameraInfo()
+        info.width = self.camera_width
+        info.height = self.camera_height
+        info.distortion_model = 'plumb_bob'
+        info.d = [0.0] * 5
+        info.k = [fx, 0.0, cx, 0.0, fy, cy, 0.0, 0.0, 1.0]
+        info.r = [1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0]
+        info.p = [fx, 0.0, cx, 0.0, 0.0, fy, cy, 0.0, 0.0, 0.0, 1.0, 0.0]
+        info.header.frame_id = 'camera_color_optical_frame'
+        return info
 
     def _install_routes(self):
         @self.app.get('/healthz')
@@ -180,6 +209,8 @@ class AstraBridge(Node):
                 depth_raw, depth_frame.width, depth_frame.height,
                 '16UC1', depth_frame.width * 2,
                 'camera_depth_optical_frame', stamp))
+            self.camera_info.header.stamp = stamp
+            self.camera_info_pub.publish(self.camera_info)
         except Exception as error:
             self.get_logger().error(
                 'Astra capture failed: %s args=%r' % (

@@ -34,6 +34,18 @@ def generate_launch_description():
             'use_astra', default_value='true',
             description='Start Astra RGB/depth bridge'),
         DeclareLaunchArgument(
+            'use_slam_toolbox', default_value='false',
+            description='Start LiDAR SLAM Toolbox alongside RTAB-Map'),
+        DeclareLaunchArgument(
+            'map_topic', default_value='/rtabmap/map',
+            description='OccupancyGrid topic used by web and navigation'),
+        DeclareLaunchArgument('camera_mount_x', default_value='0.0'),
+        DeclareLaunchArgument('camera_mount_y', default_value='0.0'),
+        DeclareLaunchArgument('camera_mount_z', default_value='0.0'),
+        DeclareLaunchArgument('camera_mount_roll', default_value='0.0'),
+        DeclareLaunchArgument('camera_mount_pitch', default_value='0.0'),
+        DeclareLaunchArgument('camera_mount_yaw', default_value='0.0'),
+        DeclareLaunchArgument(
             'slam_mode', default_value='mapping',
             description='slam_toolbox mode: mapping or localization',
             choices=['mapping', 'localization']),
@@ -88,6 +100,38 @@ def generate_launch_description():
             output='screen',
         ),
         Node(
+            package='tf2_ros',
+            executable='static_transform_publisher',
+            name='base_link_to_camera',
+            arguments=[
+                LaunchConfiguration('camera_mount_x'),
+                LaunchConfiguration('camera_mount_y'),
+                LaunchConfiguration('camera_mount_z'),
+                LaunchConfiguration('camera_mount_roll'),
+                LaunchConfiguration('camera_mount_pitch'),
+                LaunchConfiguration('camera_mount_yaw'),
+                'base_link', 'camera_link',
+            ],
+        ),
+        Node(
+            package='tf2_ros',
+            executable='static_transform_publisher',
+            name='camera_to_color_optical',
+            arguments=[
+                '0', '0', '0', '-1.57079632679', '0', '-1.57079632679',
+                'camera_link', 'camera_color_optical_frame',
+            ],
+        ),
+        Node(
+            package='tf2_ros',
+            executable='static_transform_publisher',
+            name='camera_to_depth_optical',
+            arguments=[
+                '0', '0', '0', '-1.57079632679', '0', '-1.57079632679',
+                'camera_link', 'camera_depth_optical_frame',
+            ],
+        ),
+        Node(
             package='slam_toolbox',
             executable='sync_slam_toolbox_node',
             name='slam_toolbox',
@@ -100,12 +144,16 @@ def generate_launch_description():
                 },
             ],
             output='screen',
+            condition=IfCondition(LaunchConfiguration('use_slam_toolbox')),
         ),
         Node(
             package='bringup',
             executable='web_bridge.py',
             name='web_bridge',
             parameters=[{'transform_timeout': 0.30}],
+            remappings=[
+                ('/map', LaunchConfiguration('map_topic')),
+            ],
             output='screen',
         ),
         Node(
@@ -120,7 +168,13 @@ def generate_launch_description():
             executable='navigation_node.py',
             name='navigation',
             output='screen',
-            parameters=[navigation_config],
+            remappings=[
+                ('/map', LaunchConfiguration('map_topic')),
+            ],
+            parameters=[
+                navigation_config,
+                {'map_topic': LaunchConfiguration('map_topic')},
+            ],
         ),
         IncludeLaunchDescription(
             FrontendLaunchDescriptionSource(os.path.join(

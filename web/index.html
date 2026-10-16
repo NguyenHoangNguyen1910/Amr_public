@@ -825,7 +825,7 @@
       state.dirty.overlay = true;
       markSensor('map');
       scheduleRender();
-    }, 500);
+    }, 200);
     realtimeRos.subscribe('/robot_pose', 'geometry_msgs/msg/PoseStamped', msg => {
       state.localized = true;
       state.pose = msg;

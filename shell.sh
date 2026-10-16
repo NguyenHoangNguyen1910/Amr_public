@@ -6,7 +6,14 @@ WS="$ROOT/ros"
 ROS_IMAGE="${ROS_IMAGE:-robot_nav/ros-humble:arm64}"
 ROS_CONTAINER="${ROS_CONTAINER:-yahboom-ros-main}"
 DOMAIN="${ROS_DOMAIN_ID:-20}"
-LOCALHOST="${ROS_LOCALHOST_ONLY:-1}"
+LOCALHOST="${ROS_LOCALHOST_ONLY:-0}"
+MAP_TOPIC="${MAP_TOPIC:-/rtabmap/map}"
+USE_SLAM_TOOLBOX="${USE_SLAM_TOOLBOX:-false}"
+RTABMAP_IMAGE="${RTABMAP_IMAGE:-introlab3it/rtabmap_ros:humble-latest}"
+RTABMAP_CONTAINER="${RTABMAP_CONTAINER:-rtabmap-slam}"
+RTABMAP_DATA_DIR="${RTABMAP_DATA_DIR:-$ROOT/rtabmap_data}"
+RTABMAP_DATABASE_NAME="${RTABMAP_DATABASE_NAME:-recovery/warehouse.db.(test)-depth-$(date +%Y%m%d-%H%M%S).db}"
+RTABMAP_ARGS="${RTABMAP_ARGS:---Rtabmap/DetectionRate 5.0 --Mem/IncrementalMemory true --Grid/Sensor true --Grid/RangeMax 5.0}"
 AGENT_IMAGE="${AGENT_IMAGE:-microros/micro-ros-agent:humble}"
 AGENT_CONTAINER="${AGENT_CONTAINER:-yahboom-micro-ros-agent}"
 SERIAL_DEVICE="${SERIAL_DEVICE:-/dev/ttyUSB0}"
@@ -14,7 +21,7 @@ SERIAL_BAUDRATE="${SERIAL_BAUDRATE:-921600}"
 AUTO_RESET="${AUTO_RESET:-1}"
 
 usage() { cat <<EOF
-Usage: $0 {build|bootstrap|run|serve_web|save_map NAME|stop|--background}
+Usage: $0 {build|bootstrap|rtabmap|run|serve_web|save_map NAME|stop|--background}
 Run without a command to enter the ROS container.
 EOF
 }
@@ -52,11 +59,15 @@ ros() {
   local mode="${1:-interactive}"; docker_ok; image_ok
   if docker ps --format '{{.Names}}' | grep -Fxq "$ROS_CONTAINER"; then
     [[ "$mode" == background ]] && { echo "ROS container is already running: $ROS_CONTAINER"; return; }
-    [[ "$mode" == run ]] && exec docker exec -it --env="ROS_DOMAIN_ID=$DOMAIN" --env="ROS_LOCALHOST_ONLY=$LOCALHOST" "$ROS_CONTAINER" bash -lc 'source /workspace/src/bringup/config/interactive.bash; exec ros2 launch bringup web.launch.py'
+    [[ "$mode" == run ]] && exec docker exec -it \
+      --env="ROS_DOMAIN_ID=$DOMAIN" --env="ROS_LOCALHOST_ONLY=$LOCALHOST" \
+      --env="MAP_TOPIC=$MAP_TOPIC" --env="USE_SLAM_TOOLBOX=$USE_SLAM_TOOLBOX" \
+      "$ROS_CONTAINER" bash -lc \
+      'source /workspace/src/bringup/config/interactive.bash; exec ros2 launch bringup web.launch.py map_topic:=${MAP_TOPIC} use_slam_toolbox:=${USE_SLAM_TOOLBOX}'
     exec docker exec -it --env="ROS_DOMAIN_ID=$DOMAIN" --env="ROS_LOCALHOST_ONLY=$LOCALHOST" "$ROS_CONTAINER" bash --rcfile /workspace/src/bringup/config/interactive.bash -i
   fi
   [[ -n "${DISPLAY:-}" ]] && command -v xhost >/dev/null 2>&1 && xhost +local:root >/dev/null 2>&1 || true
-  local -a args=(--name "$ROS_CONTAINER" --privileged --net=host --env="DISPLAY=${DISPLAY:-:0}" --env=QT_X11_NO_MITSHM=1 --env="ROS_DOMAIN_ID=$DOMAIN" --env="ROS_LOCALHOST_ONLY=$LOCALHOST" -v /tmp/.X11-unix:/tmp/.X11-unix --security-opt apparmor:unconfined -v "$ROOT/ros/src:/workspace/src" -v "$ROOT/maps:/workspace/maps" -v /dev/input:/dev/input -v /dev/video0:/dev/video0 -v /dev/bus/usb:/dev/bus/usb -v "$ROOT/ros/src/openi_sdk:/opt/orbbec/openni2:ro" -v "$ROOT/ros/install/bringup:/workspace/install/bringup" -v "$ROOT/ros/install/robot_localization:/workspace/install/robot_localization:ro")
+  local -a args=(--name "$ROS_CONTAINER" --privileged --net=host --ipc=host --env="DISPLAY=${DISPLAY:-:0}" --env=QT_X11_NO_MITSHM=1 --env="ROS_DOMAIN_ID=$DOMAIN" --env="ROS_LOCALHOST_ONLY=$LOCALHOST" -v /tmp/.X11-unix:/tmp/.X11-unix --security-opt apparmor:unconfined -v "$ROOT/ros/src:/workspace/src" -v "$ROOT/maps:/workspace/maps" -v /dev/input:/dev/input -v /dev/video0:/dev/video0 -v /dev/bus/usb:/dev/bus/usb -v "$ROOT/ros/src/openi_sdk:/opt/orbbec/openni2:ro" -v "$ROOT/ros/install/bringup:/workspace/install/bringup" -v "$ROOT/ros/install/robot_localization:/workspace/install/robot_localization:ro")
   if [[ "$mode" == background ]]; then
     docker run -d --rm "${args[@]}" "$ROS_IMAGE" tail -f /dev/null
   elif [[ "$mode" == run ]]; then
@@ -81,6 +92,42 @@ bootstrap() {
   echo "View logs: docker logs -f $AGENT_CONTAINER"
 }
 
+rtabmap() {
+  docker_ok
+  docker ps --format '{{.Names}}' | grep -Fxq "$ROS_CONTAINER" || {
+    echo "Error: ROS container is not running: $ROS_CONTAINER" >&2
+    exit 1
+  }
+  docker image inspect "$RTABMAP_IMAGE" >/dev/null 2>&1 || docker pull "$RTABMAP_IMAGE"
+  mkdir -p "$RTABMAP_DATA_DIR"
+  if docker inspect "$RTABMAP_CONTAINER" >/dev/null 2>&1; then
+    docker rm -f "$RTABMAP_CONTAINER" >/dev/null
+  fi
+  docker run -d --name "$RTABMAP_CONTAINER" --restart unless-stopped \
+    --network host --ipc host \
+    --env="ROS_DOMAIN_ID=$DOMAIN" --env=ROS_LOCALHOST_ONLY=0 \
+    --env=RMW_IMPLEMENTATION=rmw_fastrtps_cpp \
+    --env="RTABMAP_DATABASE_NAME=$RTABMAP_DATABASE_NAME" \
+    --env="RTABMAP_ARGS=$RTABMAP_ARGS" \
+    -v "$RTABMAP_DATA_DIR:/root/.ros" "$RTABMAP_IMAGE" \
+    bash -lc '
+      source /opt/ros/humble/setup.bash
+      exec ros2 launch rtabmap_launch rtabmap.launch.py \
+      frame_id:=base_link \
+      rgb_topic:=/camera/color/image_raw \
+      depth_topic:=/camera/depth/image_raw \
+      camera_info_topic:=/camera/color/camera_info \
+      visual_odometry:=false odom_topic:=/odom \
+      approx_sync:=true approx_sync_max_interval:=0.05 qos:=2 \
+      wait_for_transform:=0.2 odom_always_process_most_recent_frame:=true \
+      odom_args:="--Vis/MaxFeatures 400" \
+      "args:=${RTABMAP_ARGS}" \
+      "database_path:=/root/.ros/${RTABMAP_DATABASE_NAME}" \
+      rtabmap_viz:=false rviz:=false
+    ' >/dev/null
+  echo "RTAB-Map is running: $RTABMAP_CONTAINER"
+}
+
 serve_web() {
   command -v python3 >/dev/null || { echo "Error: python3 is required." >&2; exit 1; }
   test -f "$ROOT/web/index.html" || { echo "Error: web/index.html was not found." >&2; exit 1; }
@@ -99,7 +146,7 @@ save_map() {
 
 stop() {
   docker_ok
-  for c in "$ROS_CONTAINER" "$AGENT_CONTAINER"; do
+  for c in "$RTABMAP_CONTAINER" "$ROS_CONTAINER" "$AGENT_CONTAINER"; do
     if docker inspect "$c" >/dev/null 2>&1; then
       docker rm -f "$c" >/dev/null && echo "Stopped $c"
     fi
@@ -110,6 +157,7 @@ cmd="${1:-shell}"; shift || true
 case "$cmd" in
   build) [[ $# -eq 0 ]] || { usage >&2; exit 2; }; build ;;
   bootstrap) [[ $# -eq 0 ]] || { usage >&2; exit 2; }; bootstrap ;;
+  rtabmap) [[ $# -eq 0 ]] || { usage >&2; exit 2; }; rtabmap ;;
   run) [[ $# -eq 0 ]] || { usage >&2; exit 2; }; ros run ;;
   serve_web) [[ $# -eq 0 ]] || { usage >&2; exit 2; }; serve_web ;;
   save_map) save_map "$@" ;;
