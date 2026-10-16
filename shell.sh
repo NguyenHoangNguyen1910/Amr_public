@@ -9,13 +9,18 @@ DOMAIN="${ROS_DOMAIN_ID:-20}"
 LOCALHOST="${ROS_LOCALHOST_ONLY:-0}"
 MAP_TOPIC="${MAP_TOPIC:-/rtabmap/map}"
 USE_SLAM_TOOLBOX="${USE_SLAM_TOOLBOX:-false}"
-USE_ASTRA="${USE_ASTRA:-false}"
+ASTRA_IMAGE="${ASTRA_IMAGE:-husarion/astra:humble-nightly}"
 ASTRA_CONTAINER="${ASTRA_CONTAINER:-astra-camera-slam}"
+ASTRA_PARAMS_FILE="${ASTRA_PARAMS_FILE:-$ROOT/config/astra_params.yaml}"
 RTABMAP_IMAGE="${RTABMAP_IMAGE:-introlab3it/rtabmap_ros:humble-latest}"
 RTABMAP_CONTAINER="${RTABMAP_CONTAINER:-rtabmap-slam}"
 RTABMAP_DATA_DIR="${RTABMAP_DATA_DIR:-$ROOT/rtabmap_data}"
+RTABMAP_LAUNCH_FILE="${RTABMAP_LAUNCH_FILE:-$ROOT/config/rtabmap_rgbd.launch.py}"
 RTABMAP_DATABASE_NAME="${RTABMAP_DATABASE_NAME:-recovery/warehouse.db.(test)-depth-$(date +%Y%m%d-%H%M%S).db}"
 RTABMAP_ARGS="${RTABMAP_ARGS:---Rtabmap/DetectionRate 1.0 --Mem/IncrementalMemory true --Grid/Sensor true --Grid/RangeMax 5.0}"
+RTABMAP_TOPIC_QUEUE_SIZE="${RTABMAP_TOPIC_QUEUE_SIZE:-10}"
+RTABMAP_SYNC_QUEUE_SIZE="${RTABMAP_SYNC_QUEUE_SIZE:-10}"
+USE_NAVIGATION="${USE_NAVIGATION:-false}"
 AGENT_IMAGE="${AGENT_IMAGE:-microros/micro-ros-agent:humble}"
 AGENT_CONTAINER="${AGENT_CONTAINER:-yahboom-micro-ros-agent}"
 SERIAL_DEVICE="${SERIAL_DEVICE:-/dev/ttyUSB0}"
@@ -23,30 +28,100 @@ SERIAL_BAUDRATE="${SERIAL_BAUDRATE:-921600}"
 AUTO_RESET="${AUTO_RESET:-1}"
 
 usage() { cat <<EOF
-Usage: $0 {build|bootstrap|camera|rtabmap|run|serve_web|save_map NAME|stop|--background}
+Usage: $0 {build|bootstrap|rtabmap|run|serve_web|save_map NAME|stop|--background}
 Run without a command to enter the ROS container.
 EOF
 }
 docker_ok() { command -v docker >/dev/null || { echo "Error: docker is required." >&2; exit 1; }; }
 image_ok() { docker image inspect "$ROS_IMAGE" >/dev/null 2>&1 || { echo "Error: ARM64 image is missing: $ROS_IMAGE" >&2; exit 1; }; }
-start_astra_camera() {
-  [[ "$USE_ASTRA" == true ]] && return 0
-  docker inspect "$ASTRA_CONTAINER" >/dev/null 2>&1 || {
-    echo "Error: external Astra container is missing: $ASTRA_CONTAINER" >&2
-    echo "Create it first, or use USE_ASTRA=true for the legacy in-process bridge." >&2
-    return 1
-  }
-  if docker ps --format '{{.Names}}' | grep -Fxq "$ASTRA_CONTAINER"; then
-    echo "Astra camera is already running: $ASTRA_CONTAINER"
-  else
-    docker start "$ASTRA_CONTAINER" >/dev/null
-    echo "Started Astra camera: $ASTRA_CONTAINER"
+ensure_astra_camera() {
+  [[ -f "$ASTRA_PARAMS_FILE" ]] || { echo "Error: Astra params file not found: $ASTRA_PARAMS_FILE" >&2; return 1; }
+  if ! docker image inspect "$ASTRA_IMAGE" >/dev/null 2>&1; then
+    echo "Pulling Astra image: $ASTRA_IMAGE"
+    docker pull "$ASTRA_IMAGE"
   fi
+
+  if docker inspect "$ASTRA_CONTAINER" >/dev/null 2>&1; then
+    local current_image
+    current_image="$(docker inspect --format '{{.Config.Image}}' "$ASTRA_CONTAINER")"
+    if [[ "$current_image" != "$ASTRA_IMAGE" ]]; then
+      echo "Error: $ASTRA_CONTAINER uses image $current_image, expected $ASTRA_IMAGE." >&2
+      echo "Remove it once if it was created with an old camera driver." >&2
+      return 1
+    fi
+    local current_params_mount
+    current_params_mount="$(docker inspect --format '{{range .Mounts}}{{if eq .Destination "/husarion_utils/astra_params.yaml"}}{{.Source}}{{end}}{{end}}' "$ASTRA_CONTAINER")"
+    if [[ "$current_params_mount" != "$ASTRA_PARAMS_FILE" ]]; then
+      echo "Recreating Astra camera with the optimized params file"
+      docker rm -f "$ASTRA_CONTAINER" >/dev/null
+    else
+      if docker ps --format '{{.Names}}' | grep -Fxq "$ASTRA_CONTAINER"; then
+        echo "Astra camera is already running: $ASTRA_CONTAINER"
+      else
+        docker start "$ASTRA_CONTAINER" >/dev/null
+        echo "Started Astra camera: $ASTRA_CONTAINER"
+      fi
+      return 0
+    fi
+  fi
+
+  echo "Creating Astra camera container: $ASTRA_CONTAINER"
+  docker run -d \
+    --name "$ASTRA_CONTAINER" \
+    --restart unless-stopped \
+    --network host \
+    --ipc host \
+    --privileged \
+    --env="ROS_DOMAIN_ID=$DOMAIN" \
+    --env="ROS_LOCALHOST_ONLY=$LOCALHOST" \
+    --env=RMW_IMPLEMENTATION=rmw_fastrtps_cpp \
+    -v /dev/bus/usb:/dev/bus/usb \
+    -v "$ASTRA_PARAMS_FILE:/husarion_utils/astra_params.yaml:ro" \
+    "$ASTRA_IMAGE" \
+    bash -lc 'source /opt/ros/humble/setup.bash; source /ros2_ws/install/setup.bash; exec ros2 launch astra_camera astra_mini.launch.py' \
+    >/dev/null
+  echo "Started Astra camera: $ASTRA_CONTAINER"
 }
 ensure_image() {
   if ! docker image inspect "$ROS_IMAGE" >/dev/null 2>&1; then
     echo "Building ARM64 image: $ROS_IMAGE"
     docker build -t "$ROS_IMAGE" "$ROOT"
+  fi
+}
+
+ensure_micro_ros_agent() {
+  docker_ok
+  [[ -e "$SERIAL_DEVICE" ]] || {
+    echo "Error: serial device not found: $SERIAL_DEVICE" >&2
+    echo "Check the robot power, USB cable, and: ls /dev/ttyUSB*" >&2
+    return 1
+  }
+
+  local running_agent
+  running_agent="$(docker ps -q --filter "ancestor=$AGENT_IMAGE" | head -n 1)"
+  if [[ -n "$running_agent" ]]; then
+    echo "micro-ROS agent is already running: $running_agent"
+    return 0
+  fi
+
+  echo "Starting micro-ROS agent on $SERIAL_DEVICE"
+  docker run -d --rm \
+    --name "$AGENT_CONTAINER" \
+    -v /dev:/dev \
+    -v /dev/shm:/dev/shm \
+    --privileged \
+    --net=host \
+    --env="ROS_DOMAIN_ID=$DOMAIN" \
+    --env="ROS_LOCALHOST_ONLY=$LOCALHOST" \
+    "$AGENT_IMAGE" \
+    serial --dev "$SERIAL_DEVICE" -b "$SERIAL_BAUDRATE" -v4 \
+    >/dev/null
+
+  if [[ "$AUTO_RESET" == 1 ]]; then
+    sleep 1
+    if ! python3 -c 'import serial,sys,time; p=serial.Serial(sys.argv[1],baudrate=int(sys.argv[2]),timeout=.2); p.dtr=False; p.rts=False; time.sleep(.1); p.dtr=True; p.rts=True; time.sleep(.2); p.close()' "$SERIAL_DEVICE" "$SERIAL_BAUDRATE"; then
+      echo "Warning: automatic reset failed; press RESET on the micro-ROS control board." >&2
+    fi
   fi
 }
 
@@ -60,9 +135,7 @@ build() {
   docker run --rm -v "$WS:/workspace" "$ROS_IMAGE" rm -f /workspace/install/bringup/share/bringup/config/navigation.yaml
   for f in \
     "$WS/install/robot_localization/lib/robot_localization/ekf_node" \
-    "$WS/install/bringup/lib/bringup/camera_mjpeg.py" \
     "$WS/install/bringup/lib/bringup/depth_websocket.py" \
-    "$WS/install/bringup/lib/bringup/astra_bridge.py" \
     "$WS/install/bringup/lib/bringup/cmd_vel_arbiter.py" \
     "$WS/install/bringup/lib/bringup/web_bridge.py" \
     "$WS/install/bringup/lib/bringup/navigation_node.py" \
@@ -74,46 +147,44 @@ build() {
 
 ros() {
   local mode="${1:-interactive}"; docker_ok; image_ok
-  [[ "$mode" == run ]] && start_astra_camera
+  if [[ "$mode" == run ]]; then
+    ensure_micro_ros_agent
+    ensure_astra_camera
+  fi
   if docker ps --format '{{.Names}}' | grep -Fxq "$ROS_CONTAINER"; then
     [[ "$mode" == background ]] && { echo "ROS container is already running: $ROS_CONTAINER"; return; }
     [[ "$mode" == run ]] && exec docker exec -it \
       --env="ROS_DOMAIN_ID=$DOMAIN" --env="ROS_LOCALHOST_ONLY=$LOCALHOST" \
       --env="MAP_TOPIC=$MAP_TOPIC" --env="USE_SLAM_TOOLBOX=$USE_SLAM_TOOLBOX" \
-      --env="USE_ASTRA=$USE_ASTRA" \
+      --env="USE_NAVIGATION=$USE_NAVIGATION" \
       "$ROS_CONTAINER" bash -lc \
-      'source /workspace/src/bringup/config/interactive.bash; exec ros2 launch bringup web.launch.py map_topic:=${MAP_TOPIC} use_slam_toolbox:=${USE_SLAM_TOOLBOX} use_astra:=${USE_ASTRA}'
+      'source /workspace/src/bringup/config/interactive.bash; exec ros2 launch bringup web.launch.py map_topic:=${MAP_TOPIC} use_slam_toolbox:=${USE_SLAM_TOOLBOX} use_navigation:=${USE_NAVIGATION}'
     exec docker exec -it --env="ROS_DOMAIN_ID=$DOMAIN" --env="ROS_LOCALHOST_ONLY=$LOCALHOST" "$ROS_CONTAINER" bash --rcfile /workspace/src/bringup/config/interactive.bash -i
   fi
   [[ -n "${DISPLAY:-}" ]] && command -v xhost >/dev/null 2>&1 && xhost +local:root >/dev/null 2>&1 || true
-  local -a args=(--name "$ROS_CONTAINER" --privileged --net=host --ipc=host --env="DISPLAY=${DISPLAY:-:0}" --env=QT_X11_NO_MITSHM=1 --env="ROS_DOMAIN_ID=$DOMAIN" --env="ROS_LOCALHOST_ONLY=$LOCALHOST" --env="MAP_TOPIC=$MAP_TOPIC" --env="USE_SLAM_TOOLBOX=$USE_SLAM_TOOLBOX" --env="USE_ASTRA=$USE_ASTRA" -v /tmp/.X11-unix:/tmp/.X11-unix --security-opt apparmor:unconfined -v "$ROOT/ros/src:/workspace/src" -v "$ROOT/maps:/workspace/maps" -v /dev/input:/dev/input -v /dev/video0:/dev/video0 -v /dev/bus/usb:/dev/bus/usb -v "$ROOT/ros/src/openi_sdk:/opt/orbbec/openni2:ro" -v "$ROOT/ros/install/bringup:/workspace/install/bringup" -v "$ROOT/ros/install/robot_localization:/workspace/install/robot_localization:ro")
+  local -a args=(--name "$ROS_CONTAINER" --privileged --net=host --ipc=host --env="DISPLAY=${DISPLAY:-:0}" --env=QT_X11_NO_MITSHM=1 --env="ROS_DOMAIN_ID=$DOMAIN" --env="ROS_LOCALHOST_ONLY=$LOCALHOST" --env="MAP_TOPIC=$MAP_TOPIC" --env="USE_SLAM_TOOLBOX=$USE_SLAM_TOOLBOX" --env="USE_NAVIGATION=$USE_NAVIGATION" -v /tmp/.X11-unix:/tmp/.X11-unix --security-opt apparmor:unconfined -v "$ROOT/ros/src:/workspace/src" -v "$ROOT/maps:/workspace/maps" -v /dev/input:/dev/input -v /dev/bus/usb:/dev/bus/usb -v "$ROOT/ros/install/bringup:/workspace/install/bringup" -v "$ROOT/ros/install/robot_localization:/workspace/install/robot_localization:ro")
   if [[ "$mode" == background ]]; then
     docker run -d --rm "${args[@]}" "$ROS_IMAGE" tail -f /dev/null
   elif [[ "$mode" == run ]]; then
-    exec docker run -it --rm "${args[@]}" "$ROS_IMAGE" bash -lc 'source /workspace/src/bringup/config/interactive.bash; exec ros2 launch bringup web.launch.py map_topic:=${MAP_TOPIC} use_slam_toolbox:=${USE_SLAM_TOOLBOX} use_astra:=${USE_ASTRA}'
+    exec docker run -it --rm "${args[@]}" "$ROS_IMAGE" bash -lc 'source /workspace/src/bringup/config/interactive.bash; exec ros2 launch bringup web.launch.py map_topic:=${MAP_TOPIC} use_slam_toolbox:=${USE_SLAM_TOOLBOX} use_navigation:=${USE_NAVIGATION}'
   else
     exec docker run -it --rm "${args[@]}" "$ROS_IMAGE" bash --rcfile /workspace/src/bringup/config/interactive.bash -i
   fi
 }
 
 bootstrap() {
-  docker_ok; start_astra_camera; [[ -e "$SERIAL_DEVICE" ]] || { echo "Error: serial device not found: $SERIAL_DEVICE" >&2; exit 1; }
-  local running_agent="$(docker ps -q --filter "ancestor=$AGENT_IMAGE" | head -n 1)"
-  if [[ -z "$running_agent" ]]; then
-    echo "Starting micro-ROS agent on $SERIAL_DEVICE"
-    docker run -d --rm --name "$AGENT_CONTAINER" -v /dev:/dev -v /dev/shm:/dev/shm --privileged --net=host --env="ROS_DOMAIN_ID=$DOMAIN" --env="ROS_LOCALHOST_ONLY=$LOCALHOST" "$AGENT_IMAGE" serial --dev "$SERIAL_DEVICE" -b "$SERIAL_BAUDRATE" -v4
-    if [[ "$AUTO_RESET" == 1 ]]; then
-      sleep 1
-      if ! python3 -c 'import serial,sys,time; p=serial.Serial(sys.argv[1],baudrate=int(sys.argv[2]),timeout=.2); p.dtr=False; p.rts=False; time.sleep(.1); p.dtr=True; p.rts=True; time.sleep(.2); p.close()' "$SERIAL_DEVICE" "$SERIAL_BAUDRATE"; then echo "Warning: automatic reset failed; press RESET." >&2; fi
-    fi
-  else echo "micro-ROS agent is already running"; fi
+  docker_ok
+  ensure_micro_ros_agent
+  ensure_astra_camera
   ros background
   echo "View logs: docker logs -f $AGENT_CONTAINER"
 }
 
 rtabmap() {
   docker_ok
-  start_astra_camera
+  ensure_micro_ros_agent
+  ensure_astra_camera
+  [[ -f "$RTABMAP_LAUNCH_FILE" ]] || { echo "Error: RTAB-Map launch file not found: $RTABMAP_LAUNCH_FILE" >&2; exit 1; }
   docker ps --format '{{.Names}}' | grep -Fxq "$ROS_CONTAINER" || {
     echo "Error: ROS container is not running: $ROS_CONTAINER" >&2
     exit 1
@@ -141,21 +212,18 @@ rtabmap() {
     --env=RMW_IMPLEMENTATION=rmw_fastrtps_cpp \
     --env="RTABMAP_DATABASE_NAME=$RTABMAP_DATABASE_NAME" \
     --env="RTABMAP_ARGS=$RTABMAP_ARGS" \
-    -v "$RTABMAP_DATA_DIR:/root/.ros" "$RTABMAP_IMAGE" \
+    --env="RTABMAP_TOPIC_QUEUE_SIZE=$RTABMAP_TOPIC_QUEUE_SIZE" \
+    --env="RTABMAP_SYNC_QUEUE_SIZE=$RTABMAP_SYNC_QUEUE_SIZE" \
+    -v "$RTABMAP_DATA_DIR:/root/.ros" \
+    -v "$RTABMAP_LAUNCH_FILE:/opt/amr/rtabmap_rgbd.launch.py:ro" \
+    "$RTABMAP_IMAGE" \
     bash -lc '
       source /opt/ros/humble/setup.bash
-      exec ros2 launch rtabmap_launch rtabmap.launch.py \
-      frame_id:=base_link \
-      rgb_topic:=/camera/color/image_raw \
-      depth_topic:=/camera/depth/image_raw \
-      camera_info_topic:=/camera/color/camera_info \
-      visual_odometry:=false odom_topic:=/odom \
-      approx_sync:=true approx_sync_max_interval:=0.1 qos:=2 \
-      wait_for_transform:=3.0 odom_always_process_most_recent_frame:=false \
-      odom_args:="--Vis/MaxFeatures 400" \
-      "args:=${RTABMAP_ARGS}" \
+      exec ros2 launch /opt/amr/rtabmap_rgbd.launch.py \
+      "rtabmap_args:=${RTABMAP_ARGS}" \
       "database_path:=/root/.ros/${RTABMAP_DATABASE_NAME}" \
-      rtabmap_viz:=false rviz:=false
+      topic_queue_size:=${RTABMAP_TOPIC_QUEUE_SIZE} \
+      sync_queue_size:=${RTABMAP_SYNC_QUEUE_SIZE}
     ' >/dev/null
   echo "RTAB-Map is running: $RTABMAP_CONTAINER"
 }
@@ -192,7 +260,6 @@ cmd="${1:-shell}"; shift || true
 case "$cmd" in
   build) [[ $# -eq 0 ]] || { usage >&2; exit 2; }; build ;;
   bootstrap) [[ $# -eq 0 ]] || { usage >&2; exit 2; }; bootstrap ;;
-  camera) [[ $# -eq 0 ]] || { usage >&2; exit 2; }; docker_ok; start_astra_camera ;;
   rtabmap) [[ $# -eq 0 ]] || { usage >&2; exit 2; }; rtabmap ;;
   run) [[ $# -eq 0 ]] || { usage >&2; exit 2; }; ros run ;;
   serve_web) [[ $# -eq 0 ]] || { usage >&2; exit 2; }; serve_web ;;

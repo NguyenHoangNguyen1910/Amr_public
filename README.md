@@ -5,16 +5,10 @@ Astra depth camera.
 
 ## Chạy mapping RGB-D
 
-Mapping mặc định dùng camera Astra bên ngoài, RTAB-Map là backend duy nhất.
-`shell.sh` sẽ tự start container `astra-camera-slam`, container phải publish
-RGB, depth và CameraInfo trên cùng ROS domain. Có thể start riêng bằng:
-
-```bash
-./shell.sh camera
-```
-
-Nếu container `astra-camera-slam` chưa tồn tại, cần cài/provision camera
-driver trước; không chạy đồng thời driver này và `astra_bridge.py`.
+Mapping mặc định dùng driver Astra chuẩn trong container
+`astra-camera-slam`, image `husarion/astra:humble-nightly`. `shell.sh` tự
+pull, tạo và khởi động container này; Web stack chạy trong ROS container
+chính và nhận topic qua ROS 2 DDS.
 
 Build image chỉ cần chạy lần đầu hoặc sau khi sửa ROS code:
 
@@ -30,23 +24,19 @@ Terminal 1:
 ./shell.sh run
 ```
 
-RTAB-Map nhận trực tiếp RGB, depth, CameraInfo, odometry và TF qua ROS 2
-DDS. Lệnh `run` mặc định dùng map `/rtabmap/map`, tắt SLAM Toolbox và không
-khởi động bridge Astra nội bộ. RTAB-Map xử lý 1 Hz, chờ TF tối đa 3 giây,
-và xử lý frame theo thứ tự timestamp.
+RTAB-Map nhận trực tiếp RGB, depth và CameraInfo từ Astra; RGB-D odometry
+tích hợp của RTAB-Map publish `visual_odom` vì hệ thống không có LiDAR. Lệnh
+`run` mặc định dùng map `/rtabmap/map`, tắt SLAM Toolbox, navigation/scan và
+chạy depth WebSocket trong ROS container. Astra giữ độ phân giải 640×480 nhưng
+chạy RGB/depth 15 FPS, tắt IR và point cloud; RTAB-Map xử lý map 1 Hz, RGB-D
+odometry tối đa 10 Hz, queue 15 frame và ưu tiên frame mới nhất để giữ độ trễ
+trong khoảng 2–3 giây.
 
-Depth preview trên Web UI subscribe `/camera/depth/image_raw` qua WebSocket
-8082, không sở hữu camera và không làm chậm RTAB-Map.
-
-Nếu tạm thời chưa có camera container, có thể dùng bridge Astra cũ để kiểm
-tra phần còn lại của hệ thống:
+Nếu robot được gắn LiDAR và cần navigation, chạy lại web stack bằng:
 
 ```bash
-USE_ASTRA=true ./shell.sh run
+USE_NAVIGATION=true ./shell.sh run
 ```
-
-Bridge này chỉ là fallback; nó vẫn dùng CameraInfo tự tạo nên không phải cấu
-hình mapping chính thức.
 
 Terminal 2, chạy Web UI:
 
@@ -64,10 +54,11 @@ hostname -I
 Map 2D được publish ở `/rtabmap/map`. Độ trễ map có thể khoảng 2–3 giây khi
 RTAB-Map đang chờ TF hoặc xử lý backlog; depth preview vẫn cập nhật riêng.
 
-Database được lưu tại:
+Database được lưu trong thư mục `rtabmap_data/`, theo tên
+`RTABMAP_DATABASE_NAME` (mặc định là tên database có timestamp):
 
 ```text
-rtabmap_data/astra_wheel_mapping.db
+rtabmap_data/<RTABMAP_DATABASE_NAME>
 ```
 
 Xem log RTAB-Map:

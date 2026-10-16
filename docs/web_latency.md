@@ -12,14 +12,8 @@
 
 ### 1. Tách camera khỏi rosbridge — đã triển khai
 
-Trước thay đổi, camera JPEG được bọc base64 trong JSON rồi gán thành data
-URL tại web/index.html:581, đồng thời dùng chung `bulkRos` với map và scan.
-
-Đã triển khai:
-
-- Frontend không còn subscribe camera qua rosbridge.
-- `camera_mjpeg.py` phục vụ JPEG mới nhất qua HTTP `/camera.mjpg`.
-- Camera không còn đi chung WebSocket với map, LiDAR và navigation.
+Camera depth hiện được phục vụ riêng qua binary WebSocket `/ws/depth`; không
+đi qua rosbridge cùng map, LiDAR và navigation.
 
 ### 2. Chỉ gửi map khi thay đổi — đã triển khai
 
@@ -94,7 +88,7 @@ clear/vẽ lại overlay, không đụng map, scan và path.
 
 Thứ tự triển khai mình khuyên:
 
-1. ✅ Bỏ camera khỏi rosbridge và chuyển sang MJPEG.
+1. ✅ Bỏ depth camera khỏi rosbridge và chuyển sang WebSocket binary.
 2. ✅ Sửa reconnect safety để không replay command.
 3. ✅ Chuyển scan sang realtime socket và packed XY.
 4. ✅ Tách canvas layer.

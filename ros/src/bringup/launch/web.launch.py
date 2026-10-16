@@ -10,7 +10,7 @@ from launch.launch_description_sources import (
     FrontendLaunchDescriptionSource,
     PythonLaunchDescriptionSource,
 )
-from launch.substitutions import LaunchConfiguration, PythonExpression
+from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
 
 
@@ -19,23 +19,10 @@ def generate_launch_description():
     slam_params = os.path.join(
         bringup_share, 'config', 'slam.yaml')
     navigation_config = LaunchConfiguration('navigation_config')
-    camera_enabled = IfCondition(PythonExpression([
-        "'",
-        LaunchConfiguration('use_camera'), "'.lower() in ('true', '1', 'yes')",
-    ]))
-    camera_params = os.path.join(
-        get_package_share_directory('usb_cam'), 'config', 'params_1.yaml')
-
     return LaunchDescription([
         DeclareLaunchArgument(
-            'use_camera', default_value='false',
-            description='Start legacy USB camera'),
-        DeclareLaunchArgument(
-            'use_astra', default_value='false',
-            description='Start the legacy in-process Astra bridge'),
-        DeclareLaunchArgument(
             'use_depth_websocket', default_value='true',
-            description='Serve the ROS depth topic through WebSocket'),
+            description='Serve the Astra depth topic through WebSocket'),
         DeclareLaunchArgument(
             'depth_websocket_topic', default_value='/camera/depth/image_raw',
             description='Depth topic served by the WebSocket preview'),
@@ -43,8 +30,14 @@ def generate_launch_description():
             'depth_websocket_port', default_value='8082',
             description='TCP port for the depth WebSocket preview'),
         DeclareLaunchArgument(
+            'depth_websocket_hz', default_value='15.0',
+            description='Maximum depth preview publish rate'),
+        DeclareLaunchArgument(
             'use_slam_toolbox', default_value='false',
             description='Start LiDAR SLAM Toolbox alongside RTAB-Map'),
+        DeclareLaunchArgument(
+            'use_navigation', default_value='false',
+            description='Start LiDAR-dependent navigation and web scan processing'),
         DeclareLaunchArgument(
             'map_topic', default_value='/rtabmap/map',
             description='OccupancyGrid topic used by web and navigation'),
@@ -84,8 +77,9 @@ def generate_launch_description():
             executable='static_transform_publisher',
             name='base_footprint_to_base_link',
             arguments=[
-                '0', '0', '0.05', '0.0', '0.0', '0.0',
-                'base_footprint', 'base_link',
+                '--x', '0', '--y', '0', '--z', '0.05',
+                '--roll', '0', '--pitch', '0', '--yaw', '0',
+                '--frame-id', 'base_footprint', '--child-frame-id', 'base_link',
             ],
         ),
         Node(
@@ -93,8 +87,9 @@ def generate_launch_description():
             executable='static_transform_publisher',
             name='base_link_to_base_imu',
             arguments=[
-                '-0.002999', '-0.0030001', '0.031701', '0', '0', '0',
-                'base_link', 'imu_frame',
+                '--x', '-0.002999', '--y', '-0.0030001', '--z', '0.031701',
+                '--roll', '0', '--pitch', '0', '--yaw', '0',
+                '--frame-id', 'base_link', '--child-frame-id', 'imu_frame',
             ],
         ),
         Node(
@@ -113,34 +108,14 @@ def generate_launch_description():
             executable='static_transform_publisher',
             name='base_link_to_camera',
             arguments=[
-                LaunchConfiguration('camera_mount_x'),
-                LaunchConfiguration('camera_mount_y'),
-                LaunchConfiguration('camera_mount_z'),
-                LaunchConfiguration('camera_mount_roll'),
-                LaunchConfiguration('camera_mount_pitch'),
-                LaunchConfiguration('camera_mount_yaw'),
-                'base_link', 'camera_link',
+                '--x', LaunchConfiguration('camera_mount_x'),
+                '--y', LaunchConfiguration('camera_mount_y'),
+                '--z', LaunchConfiguration('camera_mount_z'),
+                '--roll', LaunchConfiguration('camera_mount_roll'),
+                '--pitch', LaunchConfiguration('camera_mount_pitch'),
+                '--yaw', LaunchConfiguration('camera_mount_yaw'),
+                '--frame-id', 'base_link', '--child-frame-id', 'camera_link',
             ],
-        ),
-        Node(
-            package='tf2_ros',
-            executable='static_transform_publisher',
-            name='camera_to_color_optical',
-            arguments=[
-                '0', '0', '0', '-1.57079632679', '0', '-1.57079632679',
-                'camera_link', 'camera_color_optical_frame',
-            ],
-            condition=IfCondition(LaunchConfiguration('use_astra')),
-        ),
-        Node(
-            package='tf2_ros',
-            executable='static_transform_publisher',
-            name='camera_to_depth_optical',
-            arguments=[
-                '0', '0', '0', '-1.57079632679', '0', '-1.57079632679',
-                'camera_link', 'camera_depth_optical_frame',
-            ],
-            condition=IfCondition(LaunchConfiguration('use_astra')),
         ),
         Node(
             package='slam_toolbox',
@@ -161,7 +136,10 @@ def generate_launch_description():
             package='bringup',
             executable='web_bridge.py',
             name='web_bridge',
-            parameters=[{'transform_timeout': 0.30}],
+            parameters=[{
+                'transform_timeout': 0.05,
+                'use_scan': LaunchConfiguration('use_navigation'),
+            }],
             remappings=[
                 ('/map', LaunchConfiguration('map_topic')),
             ],
@@ -186,32 +164,12 @@ def generate_launch_description():
                 navigation_config,
                 {'map_topic': LaunchConfiguration('map_topic')},
             ],
+            condition=IfCondition(LaunchConfiguration('use_navigation')),
         ),
         IncludeLaunchDescription(
             FrontendLaunchDescriptionSource(os.path.join(
                 get_package_share_directory('rosbridge_server'),
                 'launch', 'rosbridge_websocket_launch.xml'))),
-        Node(
-            package='usb_cam',
-            executable='usb_cam_node_exe',
-            name='camera1',
-            parameters=[
-                camera_params,
-                {'framerate': 8.0, 'image_raw.jpeg_quality': 45},
-            ],
-            remappings=[
-                ('image_raw/compressed', 'usb_cam/image_raw/compressed'),
-            ],
-            output='screen',
-            condition=camera_enabled,
-        ),
-        Node(
-            package='bringup',
-            executable='camera_mjpeg.py',
-            name='camera_mjpeg',
-            output='screen',
-            condition=camera_enabled,
-        ),
         Node(
             package='bringup',
             executable='depth_websocket.py',
@@ -219,15 +177,9 @@ def generate_launch_description():
             parameters=[{
                 'topic': LaunchConfiguration('depth_websocket_topic'),
                 'port': LaunchConfiguration('depth_websocket_port'),
+                'stream_hz': LaunchConfiguration('depth_websocket_hz'),
             }],
             output='screen',
             condition=IfCondition(LaunchConfiguration('use_depth_websocket')),
-        ),
-        Node(
-            package='bringup',
-            executable='astra_bridge.py',
-            name='astra_bridge',
-            output='screen',
-            condition=IfCondition(LaunchConfiguration('use_astra')),
         ),
     ])

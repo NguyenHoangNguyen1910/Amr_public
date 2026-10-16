@@ -162,9 +162,9 @@ Frontend không tự tính khoảng cách robot-goal. Việc robot đã tới go
 
 ### Astra depth WebSocket
 
-Node `ros/src/bringup/scripts/depth_websocket.py` subscribe depth từ driver
-Astra và phục vụ preview. Camera driver là thành phần sở hữu thiết bị và
-publish các topic raw:
+Driver `astra_camera` trong container `astra-camera-slam` sở hữu thiết bị và
+publish các topic raw. Node `depth_websocket.py` trong ROS container nhận
+depth từ driver và phục vụ preview:
 
 ```text
 /camera/color/image_raw   sensor_msgs/msg/Image, rgb8
@@ -294,6 +294,6 @@ Navigation -> /cmd_vel_nav --------------------------------------+-> cmd_vel_arb
 Web UI       -> /web/control_mode --------------------------------+
 ```
 
-`web_bridge.py`, `camera_mjpeg.py` và `cmd_vel_arbiter.py` là ba process độc
-lập. `msg/ScanPoints.msg` chỉ định nghĩa schema ROS và không tạo thêm process
+`web_bridge.py` và `cmd_vel_arbiter.py` là hai process độc lập.
+`msg/ScanPoints.msg` chỉ định nghĩa schema ROS và không tạo thêm process
 runtime.
