@@ -10,6 +10,7 @@ LOCALHOST="${ROS_LOCALHOST_ONLY:-0}"
 MAP_TOPIC="${MAP_TOPIC:-/rtabmap/map}"
 USE_SLAM_TOOLBOX="${USE_SLAM_TOOLBOX:-false}"
 USE_ASTRA="${USE_ASTRA:-false}"
+ASTRA_CONTAINER="${ASTRA_CONTAINER:-astra-camera-slam}"
 RTABMAP_IMAGE="${RTABMAP_IMAGE:-introlab3it/rtabmap_ros:humble-latest}"
 RTABMAP_CONTAINER="${RTABMAP_CONTAINER:-rtabmap-slam}"
 RTABMAP_DATA_DIR="${RTABMAP_DATA_DIR:-$ROOT/rtabmap_data}"
@@ -22,12 +23,26 @@ SERIAL_BAUDRATE="${SERIAL_BAUDRATE:-921600}"
 AUTO_RESET="${AUTO_RESET:-1}"
 
 usage() { cat <<EOF
-Usage: $0 {build|bootstrap|rtabmap|run|serve_web|save_map NAME|stop|--background}
+Usage: $0 {build|bootstrap|camera|rtabmap|run|serve_web|save_map NAME|stop|--background}
 Run without a command to enter the ROS container.
 EOF
 }
 docker_ok() { command -v docker >/dev/null || { echo "Error: docker is required." >&2; exit 1; }; }
 image_ok() { docker image inspect "$ROS_IMAGE" >/dev/null 2>&1 || { echo "Error: ARM64 image is missing: $ROS_IMAGE" >&2; exit 1; }; }
+start_astra_camera() {
+  [[ "$USE_ASTRA" == true ]] && return 0
+  docker inspect "$ASTRA_CONTAINER" >/dev/null 2>&1 || {
+    echo "Error: external Astra container is missing: $ASTRA_CONTAINER" >&2
+    echo "Create it first, or use USE_ASTRA=true for the legacy in-process bridge." >&2
+    return 1
+  }
+  if docker ps --format '{{.Names}}' | grep -Fxq "$ASTRA_CONTAINER"; then
+    echo "Astra camera is already running: $ASTRA_CONTAINER"
+  else
+    docker start "$ASTRA_CONTAINER" >/dev/null
+    echo "Started Astra camera: $ASTRA_CONTAINER"
+  fi
+}
 ensure_image() {
   if ! docker image inspect "$ROS_IMAGE" >/dev/null 2>&1; then
     echo "Building ARM64 image: $ROS_IMAGE"
@@ -59,6 +74,7 @@ build() {
 
 ros() {
   local mode="${1:-interactive}"; docker_ok; image_ok
+  [[ "$mode" == run ]] && start_astra_camera
   if docker ps --format '{{.Names}}' | grep -Fxq "$ROS_CONTAINER"; then
     [[ "$mode" == background ]] && { echo "ROS container is already running: $ROS_CONTAINER"; return; }
     [[ "$mode" == run ]] && exec docker exec -it \
@@ -81,7 +97,7 @@ ros() {
 }
 
 bootstrap() {
-  docker_ok; [[ -e "$SERIAL_DEVICE" ]] || { echo "Error: serial device not found: $SERIAL_DEVICE" >&2; exit 1; }
+  docker_ok; start_astra_camera; [[ -e "$SERIAL_DEVICE" ]] || { echo "Error: serial device not found: $SERIAL_DEVICE" >&2; exit 1; }
   local running_agent="$(docker ps -q --filter "ancestor=$AGENT_IMAGE" | head -n 1)"
   if [[ -z "$running_agent" ]]; then
     echo "Starting micro-ROS agent on $SERIAL_DEVICE"
@@ -97,6 +113,7 @@ bootstrap() {
 
 rtabmap() {
   docker_ok
+  start_astra_camera
   docker ps --format '{{.Names}}' | grep -Fxq "$ROS_CONTAINER" || {
     echo "Error: ROS container is not running: $ROS_CONTAINER" >&2
     exit 1
@@ -161,6 +178,9 @@ save_map() {
 
 stop() {
   docker_ok
+  if docker ps --format '{{.Names}}' | grep -Fxq "$ASTRA_CONTAINER"; then
+    docker stop "$ASTRA_CONTAINER" >/dev/null && echo "Stopped $ASTRA_CONTAINER"
+  fi
   for c in "$RTABMAP_CONTAINER" "$ROS_CONTAINER" "$AGENT_CONTAINER"; do
     if docker inspect "$c" >/dev/null 2>&1; then
       docker rm -f "$c" >/dev/null && echo "Stopped $c"
@@ -172,6 +192,7 @@ cmd="${1:-shell}"; shift || true
 case "$cmd" in
   build) [[ $# -eq 0 ]] || { usage >&2; exit 2; }; build ;;
   bootstrap) [[ $# -eq 0 ]] || { usage >&2; exit 2; }; bootstrap ;;
+  camera) [[ $# -eq 0 ]] || { usage >&2; exit 2; }; docker_ok; start_astra_camera ;;
   rtabmap) [[ $# -eq 0 ]] || { usage >&2; exit 2; }; rtabmap ;;
   run) [[ $# -eq 0 ]] || { usage >&2; exit 2; }; ros run ;;
   serve_web) [[ $# -eq 0 ]] || { usage >&2; exit 2; }; serve_web ;;

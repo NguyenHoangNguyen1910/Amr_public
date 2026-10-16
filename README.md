@@ -6,10 +6,11 @@ Astra depth camera.
 ## Chạy mapping RGB-D
 
 Mapping mặc định dùng camera Astra bên ngoài, RTAB-Map là backend duy nhất.
-Container camera phải publish RGB, depth và CameraInfo trên cùng ROS domain:
+`shell.sh` sẽ tự start container `astra-camera-slam`, container phải publish
+RGB, depth và CameraInfo trên cùng ROS domain. Có thể start riêng bằng:
 
 ```bash
-docker start astra-camera-slam
+./shell.sh camera
 ```
 
 Nếu container `astra-camera-slam` chưa tồn tại, cần cài/provision camera
