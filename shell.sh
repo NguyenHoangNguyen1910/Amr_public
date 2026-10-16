@@ -9,11 +9,12 @@ DOMAIN="${ROS_DOMAIN_ID:-20}"
 LOCALHOST="${ROS_LOCALHOST_ONLY:-0}"
 MAP_TOPIC="${MAP_TOPIC:-/rtabmap/map}"
 USE_SLAM_TOOLBOX="${USE_SLAM_TOOLBOX:-false}"
+USE_ASTRA="${USE_ASTRA:-false}"
 RTABMAP_IMAGE="${RTABMAP_IMAGE:-introlab3it/rtabmap_ros:humble-latest}"
 RTABMAP_CONTAINER="${RTABMAP_CONTAINER:-rtabmap-slam}"
 RTABMAP_DATA_DIR="${RTABMAP_DATA_DIR:-$ROOT/rtabmap_data}"
 RTABMAP_DATABASE_NAME="${RTABMAP_DATABASE_NAME:-recovery/warehouse.db.(test)-depth-$(date +%Y%m%d-%H%M%S).db}"
-RTABMAP_ARGS="${RTABMAP_ARGS:---Rtabmap/DetectionRate 5.0 --Mem/IncrementalMemory true --Grid/Sensor true --Grid/RangeMax 5.0}"
+RTABMAP_ARGS="${RTABMAP_ARGS:---Rtabmap/DetectionRate 1.0 --Mem/IncrementalMemory true --Grid/Sensor true --Grid/RangeMax 5.0}"
 AGENT_IMAGE="${AGENT_IMAGE:-microros/micro-ros-agent:humble}"
 AGENT_CONTAINER="${AGENT_CONTAINER:-yahboom-micro-ros-agent}"
 SERIAL_DEVICE="${SERIAL_DEVICE:-/dev/ttyUSB0}"
@@ -45,6 +46,7 @@ build() {
   for f in \
     "$WS/install/robot_localization/lib/robot_localization/ekf_node" \
     "$WS/install/bringup/lib/bringup/camera_mjpeg.py" \
+    "$WS/install/bringup/lib/bringup/depth_websocket.py" \
     "$WS/install/bringup/lib/bringup/astra_bridge.py" \
     "$WS/install/bringup/lib/bringup/cmd_vel_arbiter.py" \
     "$WS/install/bringup/lib/bringup/web_bridge.py" \
@@ -62,16 +64,17 @@ ros() {
     [[ "$mode" == run ]] && exec docker exec -it \
       --env="ROS_DOMAIN_ID=$DOMAIN" --env="ROS_LOCALHOST_ONLY=$LOCALHOST" \
       --env="MAP_TOPIC=$MAP_TOPIC" --env="USE_SLAM_TOOLBOX=$USE_SLAM_TOOLBOX" \
+      --env="USE_ASTRA=$USE_ASTRA" \
       "$ROS_CONTAINER" bash -lc \
-      'source /workspace/src/bringup/config/interactive.bash; exec ros2 launch bringup web.launch.py map_topic:=${MAP_TOPIC} use_slam_toolbox:=${USE_SLAM_TOOLBOX}'
+      'source /workspace/src/bringup/config/interactive.bash; exec ros2 launch bringup web.launch.py map_topic:=${MAP_TOPIC} use_slam_toolbox:=${USE_SLAM_TOOLBOX} use_astra:=${USE_ASTRA}'
     exec docker exec -it --env="ROS_DOMAIN_ID=$DOMAIN" --env="ROS_LOCALHOST_ONLY=$LOCALHOST" "$ROS_CONTAINER" bash --rcfile /workspace/src/bringup/config/interactive.bash -i
   fi
   [[ -n "${DISPLAY:-}" ]] && command -v xhost >/dev/null 2>&1 && xhost +local:root >/dev/null 2>&1 || true
-  local -a args=(--name "$ROS_CONTAINER" --privileged --net=host --ipc=host --env="DISPLAY=${DISPLAY:-:0}" --env=QT_X11_NO_MITSHM=1 --env="ROS_DOMAIN_ID=$DOMAIN" --env="ROS_LOCALHOST_ONLY=$LOCALHOST" -v /tmp/.X11-unix:/tmp/.X11-unix --security-opt apparmor:unconfined -v "$ROOT/ros/src:/workspace/src" -v "$ROOT/maps:/workspace/maps" -v /dev/input:/dev/input -v /dev/video0:/dev/video0 -v /dev/bus/usb:/dev/bus/usb -v "$ROOT/ros/src/openi_sdk:/opt/orbbec/openni2:ro" -v "$ROOT/ros/install/bringup:/workspace/install/bringup" -v "$ROOT/ros/install/robot_localization:/workspace/install/robot_localization:ro")
+  local -a args=(--name "$ROS_CONTAINER" --privileged --net=host --ipc=host --env="DISPLAY=${DISPLAY:-:0}" --env=QT_X11_NO_MITSHM=1 --env="ROS_DOMAIN_ID=$DOMAIN" --env="ROS_LOCALHOST_ONLY=$LOCALHOST" --env="MAP_TOPIC=$MAP_TOPIC" --env="USE_SLAM_TOOLBOX=$USE_SLAM_TOOLBOX" --env="USE_ASTRA=$USE_ASTRA" -v /tmp/.X11-unix:/tmp/.X11-unix --security-opt apparmor:unconfined -v "$ROOT/ros/src:/workspace/src" -v "$ROOT/maps:/workspace/maps" -v /dev/input:/dev/input -v /dev/video0:/dev/video0 -v /dev/bus/usb:/dev/bus/usb -v "$ROOT/ros/src/openi_sdk:/opt/orbbec/openni2:ro" -v "$ROOT/ros/install/bringup:/workspace/install/bringup" -v "$ROOT/ros/install/robot_localization:/workspace/install/robot_localization:ro")
   if [[ "$mode" == background ]]; then
     docker run -d --rm "${args[@]}" "$ROS_IMAGE" tail -f /dev/null
   elif [[ "$mode" == run ]]; then
-    exec docker run -it --rm "${args[@]}" "$ROS_IMAGE" bash -lc 'source /workspace/src/bringup/config/interactive.bash; exec ros2 launch bringup web.launch.py'
+    exec docker run -it --rm "${args[@]}" "$ROS_IMAGE" bash -lc 'source /workspace/src/bringup/config/interactive.bash; exec ros2 launch bringup web.launch.py map_topic:=${MAP_TOPIC} use_slam_toolbox:=${USE_SLAM_TOOLBOX} use_astra:=${USE_ASTRA}'
   else
     exec docker run -it --rm "${args[@]}" "$ROS_IMAGE" bash --rcfile /workspace/src/bringup/config/interactive.bash -i
   fi
@@ -101,6 +104,15 @@ rtabmap() {
   docker image inspect "$RTABMAP_IMAGE" >/dev/null 2>&1 || docker pull "$RTABMAP_IMAGE"
   mkdir -p "$RTABMAP_DATA_DIR"
   if docker inspect "$RTABMAP_CONTAINER" >/dev/null 2>&1; then
+    if [[ "${FORCE_RECREATE:-0}" != 1 ]]; then
+      if docker ps --format '{{.Names}}' | grep -Fxq "$RTABMAP_CONTAINER"; then
+        echo "RTAB-Map is already running: $RTABMAP_CONTAINER"
+      else
+        echo "RTAB-Map container already exists: $RTABMAP_CONTAINER"
+        echo "Use FORCE_RECREATE=1 only when intentionally replacing it."
+      fi
+      return
+    fi
     docker rm -f "$RTABMAP_CONTAINER" >/dev/null
   fi
   docker run -d --name "$RTABMAP_CONTAINER" --restart unless-stopped \
@@ -118,8 +130,8 @@ rtabmap() {
       depth_topic:=/camera/depth/image_raw \
       camera_info_topic:=/camera/color/camera_info \
       visual_odometry:=false odom_topic:=/odom \
-      approx_sync:=true approx_sync_max_interval:=0.05 qos:=2 \
-      wait_for_transform:=0.2 odom_always_process_most_recent_frame:=true \
+      approx_sync:=true approx_sync_max_interval:=0.1 qos:=2 \
+      wait_for_transform:=3.0 odom_always_process_most_recent_frame:=false \
       odom_args:="--Vis/MaxFeatures 400" \
       "args:=${RTABMAP_ARGS}" \
       "database_path:=/root/.ros/${RTABMAP_DATABASE_NAME}" \

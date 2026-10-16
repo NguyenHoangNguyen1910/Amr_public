@@ -3,7 +3,17 @@
 ROS 2 AMR stack for Raspberry Pi 5, using the ARM64 Yahboom image and an
 Astra depth camera.
 
-## Chạy mapping
+## Chạy mapping RGB-D
+
+Mapping mặc định dùng camera Astra bên ngoài, RTAB-Map là backend duy nhất.
+Container camera phải publish RGB, depth và CameraInfo trên cùng ROS domain:
+
+```bash
+docker start astra-camera-slam
+```
+
+Nếu container `astra-camera-slam` chưa tồn tại, cần cài/provision camera
+driver trước; không chạy đồng thời driver này và `astra_bridge.py`.
 
 Build image chỉ cần chạy lần đầu hoặc sau khi sửa ROS code:
 
@@ -20,14 +30,22 @@ Terminal 1:
 ```
 
 RTAB-Map nhận trực tiếp RGB, depth, CameraInfo, odometry và TF qua ROS 2
-DDS. Lệnh `run` mặc định dùng map `/rtabmap/map` và tắt SLAM Toolbox.
-RTAB-Map chạy 5 Hz, ưu tiên frame mới nhất; Web UI cập nhật map tối đa 5 Hz.
+DDS. Lệnh `run` mặc định dùng map `/rtabmap/map`, tắt SLAM Toolbox và không
+khởi động bridge Astra nội bộ. RTAB-Map xử lý 1 Hz, chờ TF tối đa 3 giây,
+và xử lý frame theo thứ tự timestamp.
 
-Nếu cần dùng lại SLAM Toolbox:
+Depth preview trên Web UI subscribe `/camera/depth/image_raw` qua WebSocket
+8082, không sở hữu camera và không làm chậm RTAB-Map.
+
+Nếu tạm thời chưa có camera container, có thể dùng bridge Astra cũ để kiểm
+tra phần còn lại của hệ thống:
 
 ```bash
-MAP_TOPIC=/map USE_SLAM_TOOLBOX=true ./shell.sh run
+USE_ASTRA=true ./shell.sh run
 ```
+
+Bridge này chỉ là fallback; nó vẫn dùng CameraInfo tự tạo nên không phải cấu
+hình mapping chính thức.
 
 Terminal 2, chạy Web UI:
 
@@ -42,8 +60,8 @@ Lấy IP robot bằng:
 hostname -I
 ```
 
-RTAB-Map nhận RGB, depth, CameraInfo, odometry và TF trực tiếp qua ROS 2 DDS.
-Map 2D được publish ở `/rtabmap/map`, xử lý 5 Hz và Web UI cập nhật tối đa 5 Hz.
+Map 2D được publish ở `/rtabmap/map`. Độ trễ map có thể khoảng 2–3 giây khi
+RTAB-Map đang chờ TF hoặc xử lý backlog; depth preview vẫn cập nhật riêng.
 
 Database được lưu tại:
 

@@ -31,8 +31,17 @@ def generate_launch_description():
             'use_camera', default_value='false',
             description='Start legacy USB camera'),
         DeclareLaunchArgument(
-            'use_astra', default_value='true',
-            description='Start Astra RGB/depth bridge'),
+            'use_astra', default_value='false',
+            description='Start the legacy in-process Astra bridge'),
+        DeclareLaunchArgument(
+            'use_depth_websocket', default_value='true',
+            description='Serve the ROS depth topic through WebSocket'),
+        DeclareLaunchArgument(
+            'depth_websocket_topic', default_value='/camera/depth/image_raw',
+            description='Depth topic served by the WebSocket preview'),
+        DeclareLaunchArgument(
+            'depth_websocket_port', default_value='8082',
+            description='TCP port for the depth WebSocket preview'),
         DeclareLaunchArgument(
             'use_slam_toolbox', default_value='false',
             description='Start LiDAR SLAM Toolbox alongside RTAB-Map'),
@@ -121,6 +130,7 @@ def generate_launch_description():
                 '0', '0', '0', '-1.57079632679', '0', '-1.57079632679',
                 'camera_link', 'camera_color_optical_frame',
             ],
+            condition=IfCondition(LaunchConfiguration('use_astra')),
         ),
         Node(
             package='tf2_ros',
@@ -130,6 +140,7 @@ def generate_launch_description():
                 '0', '0', '0', '-1.57079632679', '0', '-1.57079632679',
                 'camera_link', 'camera_depth_optical_frame',
             ],
+            condition=IfCondition(LaunchConfiguration('use_astra')),
         ),
         Node(
             package='slam_toolbox',
@@ -200,6 +211,17 @@ def generate_launch_description():
             name='camera_mjpeg',
             output='screen',
             condition=camera_enabled,
+        ),
+        Node(
+            package='bringup',
+            executable='depth_websocket.py',
+            name='depth_websocket',
+            parameters=[{
+                'topic': LaunchConfiguration('depth_websocket_topic'),
+                'port': LaunchConfiguration('depth_websocket_port'),
+            }],
+            output='screen',
+            condition=IfCondition(LaunchConfiguration('use_depth_websocket')),
         ),
         Node(
             package='bringup',

@@ -162,15 +162,16 @@ Frontend không tự tính khoảng cách robot-goal. Việc robot đã tới go
 
 ### Astra depth WebSocket
 
-Node `ros/src/bringup/scripts/astra_bridge.py` đọc Astra bằng OpenNI2, publish
-hai topic raw:
+Node `ros/src/bringup/scripts/depth_websocket.py` subscribe depth từ driver
+Astra và phục vụ preview. Camera driver là thành phần sở hữu thiết bị và
+publish các topic raw:
 
 ```text
 /camera/color/image_raw   sensor_msgs/msg/Image, rgb8
 /camera/depth/image_raw   sensor_msgs/msg/Image, 16UC1
 ```
 
-Cùng node này giữ frame depth preview mới nhất và phục vụ
+`depth_websocket.py` giữ frame depth preview mới nhất và phục vụ
 `/ws/depth` trên port `8082`. Payload binary là một byte/pixel; giá trị `0`
 là pixel không hợp lệ, còn các giá trị `1..255` được UI map sang màu đỏ-vàng-
 xanh-lam-đen.
