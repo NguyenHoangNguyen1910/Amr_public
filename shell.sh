@@ -17,10 +17,12 @@ RTABMAP_CONTAINER="${RTABMAP_CONTAINER:-rtabmap-slam}"
 RTABMAP_DATA_DIR="${RTABMAP_DATA_DIR:-$ROOT/rtabmap_data}"
 RTABMAP_LAUNCH_FILE="${RTABMAP_LAUNCH_FILE:-$ROOT/config/rtabmap_rgbd.launch.py}"
 RTABMAP_DATABASE_NAME="${RTABMAP_DATABASE_NAME:-recovery/warehouse.db.(test)-depth-$(date +%Y%m%d-%H%M%S).db}"
+RTABMAP_PERSIST="${RTABMAP_PERSIST:-false}"
+RTABMAP_SESSION_DB="${RTABMAP_SESSION_DB:-amr-rtabmap-session.db}"
 RTABMAP_ARGS="${RTABMAP_ARGS:---Rtabmap/DetectionRate 1.0 --Mem/IncrementalMemory true --Grid/Sensor true --Grid/RangeMax 5.0}"
 RTABMAP_TOPIC_QUEUE_SIZE="${RTABMAP_TOPIC_QUEUE_SIZE:-10}"
 RTABMAP_SYNC_QUEUE_SIZE="${RTABMAP_SYNC_QUEUE_SIZE:-10}"
-USE_NAVIGATION="${USE_NAVIGATION:-false}"
+USE_NAVIGATION="${USE_NAVIGATION:-true}"
 AGENT_IMAGE="${AGENT_IMAGE:-microros/micro-ros-agent:humble}"
 AGENT_CONTAINER="${AGENT_CONTAINER:-yahboom-micro-ros-agent}"
 SERIAL_DEVICE="${SERIAL_DEVICE:-/dev/ttyUSB0}"
@@ -190,38 +192,66 @@ rtabmap() {
     exit 1
   }
   docker image inspect "$RTABMAP_IMAGE" >/dev/null 2>&1 || docker pull "$RTABMAP_IMAGE"
-  mkdir -p "$RTABMAP_DATA_DIR"
+  local persist_mode=false
+  case "${RTABMAP_PERSIST,,}" in
+    true|1|yes) persist_mode=true ;;
+    false|0|no|'') persist_mode=false ;;
+    *)
+      echo "Error: RTABMAP_PERSIST must be true or false." >&2
+      return 1
+      ;;
+  esac
+
+  local database_path
+  local rtabmap_args="$RTABMAP_ARGS"
+  local -a rtabmap_mounts
+  if [[ "$persist_mode" == true ]]; then
+    mkdir -p "$RTABMAP_DATA_DIR"
+    database_path="/root/.ros/$RTABMAP_DATABASE_NAME"
+    rtabmap_mounts=(-v "$RTABMAP_DATA_DIR:/root/.ros")
+  else
+    database_path="/rtabmap_ram/$RTABMAP_SESSION_DB"
+    rtabmap_args="$rtabmap_args --delete_db_on_start"
+    rtabmap_mounts=(-v "/dev/shm:/rtabmap_ram")
+  fi
+
   if docker inspect "$RTABMAP_CONTAINER" >/dev/null 2>&1; then
-    if [[ "${FORCE_RECREATE:-0}" != 1 ]]; then
-      if docker ps --format '{{.Names}}' | grep -Fxq "$RTABMAP_CONTAINER"; then
-        echo "RTAB-Map is already running: $RTABMAP_CONTAINER"
-      else
-        echo "RTAB-Map container already exists: $RTABMAP_CONTAINER"
-        echo "Use FORCE_RECREATE=1 only when intentionally replacing it."
-      fi
+    local existing_persist
+    existing_persist="$(docker inspect --format '{{range .Config.Env}}{{println .}}{{end}}' \
+      "$RTABMAP_CONTAINER" | sed -n 's/^RTABMAP_PERSIST=//p')"
+    # A non-persistent invocation is deliberately a new mapping session.  This
+    # makes `./shell.sh rtabmap` sufficient to reset the in-memory map and
+    # avoids accidentally reusing a stopped RTAB-Map container.
+    if [[ "$persist_mode" == true && "${FORCE_RECREATE:-0}" != 1 && "$existing_persist" == "$persist_mode" ]] && \
+       docker ps --format '{{.Names}}' | grep -Fxq "$RTABMAP_CONTAINER"; then
+      echo "RTAB-Map is already running: $RTABMAP_CONTAINER"
       return
     fi
     if docker ps --format '{{.Names}}' | grep -Fxq "$RTABMAP_CONTAINER"; then
-      docker stop "$RTABMAP_CONTAINER" >/dev/null
+      echo "Stopping previous RTAB-Map session: $RTABMAP_CONTAINER"
+      docker stop -t 30 "$RTABMAP_CONTAINER" >/dev/null
     fi
+    echo "Removing previous RTAB-Map container: $RTABMAP_CONTAINER"
     docker rm "$RTABMAP_CONTAINER" >/dev/null
   fi
-  docker run -d --name "$RTABMAP_CONTAINER" --restart unless-stopped \
+  docker run -d --name "$RTABMAP_CONTAINER" --restart on-failure:3 \
+    --stop-signal SIGINT \
     --network host --ipc host \
     --env="ROS_DOMAIN_ID=$DOMAIN" --env=ROS_LOCALHOST_ONLY=0 \
     --env=RMW_IMPLEMENTATION=rmw_fastrtps_cpp \
+    --env="RTABMAP_PERSIST=$persist_mode" \
     --env="RTABMAP_DATABASE_NAME=$RTABMAP_DATABASE_NAME" \
-    --env="RTABMAP_ARGS=$RTABMAP_ARGS" \
+    --env="RTABMAP_ARGS=$rtabmap_args" \
     --env="RTABMAP_TOPIC_QUEUE_SIZE=$RTABMAP_TOPIC_QUEUE_SIZE" \
     --env="RTABMAP_SYNC_QUEUE_SIZE=$RTABMAP_SYNC_QUEUE_SIZE" \
-    -v "$RTABMAP_DATA_DIR:/root/.ros" \
+    "${rtabmap_mounts[@]}" \
     -v "$RTABMAP_LAUNCH_FILE:/opt/amr/rtabmap_rgbd.launch.py:ro" \
     "$RTABMAP_IMAGE" \
     bash -lc '
       source /opt/ros/humble/setup.bash
       exec ros2 launch /opt/amr/rtabmap_rgbd.launch.py \
       "rtabmap_args:=${RTABMAP_ARGS}" \
-      "database_path:=/root/.ros/${RTABMAP_DATABASE_NAME}" \
+      "database_path:='"$database_path"'" \
       topic_queue_size:=${RTABMAP_TOPIC_QUEUE_SIZE} \
       sync_queue_size:=${RTABMAP_SYNC_QUEUE_SIZE}
     ' >/dev/null
@@ -247,11 +277,17 @@ save_map() {
 stop() {
   docker_ok
   if docker ps --format '{{.Names}}' | grep -Fxq "$ASTRA_CONTAINER"; then
-    docker stop "$ASTRA_CONTAINER" >/dev/null && echo "Stopped $ASTRA_CONTAINER"
+    docker stop -t 30 "$ASTRA_CONTAINER" >/dev/null && echo "Stopped $ASTRA_CONTAINER"
   fi
   for c in "$RTABMAP_CONTAINER" "$ROS_CONTAINER" "$AGENT_CONTAINER"; do
     if docker inspect "$c" >/dev/null 2>&1; then
-      docker rm -f "$c" >/dev/null && echo "Stopped $c"
+      if docker ps --format '{{.Names}}' | grep -Fxq "$c"; then
+        docker stop -t 30 "$c" >/dev/null || true
+      fi
+      if docker inspect "$c" >/dev/null 2>&1; then
+        docker rm "$c" >/dev/null || true
+      fi
+      echo "Stopped $c"
     fi
   done
 }

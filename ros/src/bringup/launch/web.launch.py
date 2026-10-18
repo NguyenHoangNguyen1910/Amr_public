@@ -36,7 +36,7 @@ def generate_launch_description():
             'use_slam_toolbox', default_value='false',
             description='Start LiDAR SLAM Toolbox alongside RTAB-Map'),
         DeclareLaunchArgument(
-            'use_navigation', default_value='false',
+            'use_navigation', default_value='true',
             description='Start LiDAR-dependent navigation and web scan processing'),
         DeclareLaunchArgument(
             'map_topic', default_value='/rtabmap/map',

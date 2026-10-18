@@ -26,16 +26,16 @@ Terminal 1:
 
 RTAB-Map nhận trực tiếp RGB, depth và CameraInfo từ Astra; RGB-D odometry
 tích hợp của RTAB-Map publish `visual_odom` vì hệ thống không có LiDAR. Lệnh
-`run` mặc định dùng map `/rtabmap/map`, tắt SLAM Toolbox, navigation/scan và
-chạy depth WebSocket trong ROS container. Astra giữ độ phân giải 640×480 nhưng
+`run` mặc định dùng map `/rtabmap/map`, tắt SLAM Toolbox nhưng bật navigation/scan
+và chạy depth WebSocket trong ROS container. Astra giữ độ phân giải 640×480 nhưng
 chạy RGB/depth 15 FPS, tắt IR và point cloud; RTAB-Map xử lý map 1 Hz, RGB-D
 odometry tối đa 10 Hz, queue 15 frame và ưu tiên frame mới nhất để giữ độ trễ
 trong khoảng 2–3 giây.
 
-Nếu robot được gắn LiDAR và cần navigation, chạy lại web stack bằng:
+Nếu không cần navigation và chỉ muốn chạy mapping/teleop, chạy web stack bằng:
 
 ```bash
-USE_NAVIGATION=true ./shell.sh run
+USE_NAVIGATION=false ./shell.sh run
 ```
 
 Terminal 2, chạy Web UI:
@@ -54,7 +54,17 @@ hostname -I
 Map 2D được publish ở `/rtabmap/map`. Độ trễ map có thể khoảng 2–3 giây khi
 RTAB-Map đang chờ TF hoặc xử lý backlog; depth preview vẫn cập nhật riêng.
 
-Database được lưu trong thư mục `rtabmap_data/`, theo tên
+Mặc định RTAB-Map chạy theo phiên: database nằm trên `/dev/shm` và bị xóa
+khi phiên mới bắt đầu, nên không ghi database xuống thẻ nhớ. Chế độ này vẫn
+giữ pose graph/map trong suốt thời gian robot đang chạy.
+
+Nếu cần lưu database để phân tích hoặc tiếp tục phiên sau, bật:
+
+```bash
+RTABMAP_PERSIST=true ./shell.sh rtabmap
+```
+
+Chế độ persistent lưu trong thư mục `rtabmap_data/`, theo tên
 `RTABMAP_DATABASE_NAME` (mặc định là tên database có timestamp):
 
 ```text
@@ -66,6 +76,9 @@ Xem log RTAB-Map:
 ```bash
 docker logs -f rtabmap-slam
 ```
+
+Database phiên trên `/dev/shm` dùng RAM thay vì storage; cần theo dõi dung
+lượng RAM nếu mapping trong thời gian dài.
 
 
 ## Stop

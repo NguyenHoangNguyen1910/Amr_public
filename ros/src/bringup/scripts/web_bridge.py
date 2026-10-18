@@ -101,7 +101,12 @@ class WebBridge(Node):
         try:
             transform = self.tf_buffer.lookup_transform(
                 self.map_frame, self.base_frame, Time())
-        except TransformException:
+        except TransformException as error:
+            self.get_logger().warning(
+                'Robot pose unavailable: TF %s -> %s is missing (%s)' %
+                (self.map_frame, self.base_frame, error),
+                throttle_duration_sec=5.0,
+            )
             return
 
         pose = PoseStamped()
