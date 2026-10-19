@@ -16,6 +16,9 @@ navigation:
     robot_radius_m: 0.08                   # Bán kính thân robot.
     safety_margin_m: 0.02                  # Margin global map; inflation tổng là 0.10 m.
     local_safety_margin_m: 0.015           # Margin thêm khi kiểm tra LiDAR local.
+    front_obstacle_clearance_m: 0.60       # Khoảng hở từ mũi robot đến vật cản phía trước.
+    robot_front_extent_m: 0.08             # Tạm lấy theo robot_radius; đo lại từ base_footprint đến mũi.
+    robot_half_width_m: 0.08               # Tạm lấy theo robot_radius; đo lại nửa bề rộng thân.
     goal_tolerance_m: 0.06                 # Sai số vị trí tối đa để thành công.
     goal_terminal_entry_m: 0.30            # Vào terminal controller khi gần goal hơn mức này.
     goal_terminal_exit_m: 0.40             # Phải lớn hơn entry để không đảo chế độ liên tục.

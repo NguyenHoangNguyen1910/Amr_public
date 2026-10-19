@@ -10,6 +10,9 @@ class NavigationConfig:
     robot_radius_m: float = 0.05
     safety_margin_m: float = 0.05
     local_safety_margin_m: float = 0.03
+    front_obstacle_clearance_m: float = 0.60
+    robot_front_extent_m: float = 0.05
+    robot_half_width_m: float = 0.05
     goal_tolerance_m: float = 0.12
     goal_terminal_entry_m: float = 0.20
     goal_terminal_exit_m: float = 0.30
@@ -49,6 +52,9 @@ class NavigationConfig:
         positive = (
             self.robot_radius_m,
             self.safety_margin_m,
+            self.front_obstacle_clearance_m,
+            self.robot_front_extent_m,
+            self.robot_half_width_m,
             self.goal_tolerance_m,
             self.goal_terminal_exit_m,
             self.goal_terminal_entry_m,

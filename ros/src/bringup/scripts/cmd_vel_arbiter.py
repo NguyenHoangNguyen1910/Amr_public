@@ -23,14 +23,22 @@ class CmdVelArbiter(Node):
         self.declare_parameter('publish_rate', 20.0)
         self.declare_parameter('min_linear_x', -0.22)
         self.declare_parameter('max_linear_x', 0.30)
+        self.declare_parameter('manual_max_linear_x', 0.15)
         self.declare_parameter('max_angular_z', 0.55)
+        self.declare_parameter('manual_max_angular_z', 0.30)
 
         self.mode = str(self.get_parameter('default_mode').value)
         self.manual_timeout = float(self.get_parameter('manual_timeout').value)
         self.nav_timeout = float(self.get_parameter('nav_timeout').value)
         self.min_linear_x = min(0.0, float(self.get_parameter('min_linear_x').value))
         self.max_linear_x = max(0.0, float(self.get_parameter('max_linear_x').value))
+        self.manual_max_linear_x = abs(
+            float(self.get_parameter('manual_max_linear_x').value)
+        )
         self.max_angular_z = abs(float(self.get_parameter('max_angular_z').value))
+        self.manual_max_angular_z = abs(
+            float(self.get_parameter('manual_max_angular_z').value)
+        )
         self.emergency_stop = False
         self.manual_command = Twist()
         self.nav_command = Twist()
@@ -93,15 +101,21 @@ class CmdVelArbiter(Node):
             elif self.mode == 'nav' and now - self.nav_time <= self.nav_timeout:
                 selected = self.nav_command
 
-        selected.linear.x = self.clamp(
-            selected.linear.x, self.min_linear_x, self.max_linear_x
-        )
+        if self.mode == 'manual':
+            linear_min = max(self.min_linear_x, -self.manual_max_linear_x)
+            linear_max = min(self.max_linear_x, self.manual_max_linear_x)
+        else:
+            linear_min, linear_max = self.min_linear_x, self.max_linear_x
+        selected.linear.x = self.clamp(selected.linear.x, linear_min, linear_max)
         selected.linear.y = 0.0
         selected.linear.z = 0.0
         selected.angular.x = 0.0
         selected.angular.y = 0.0
+        angular_limit = self.max_angular_z
+        if self.mode == 'manual':
+            angular_limit = min(angular_limit, self.manual_max_angular_z)
         selected.angular.z = self.clamp(
-            selected.angular.z, -self.max_angular_z, self.max_angular_z
+            selected.angular.z, -angular_limit, angular_limit
         )
         self.output.publish(selected)
 

@@ -745,8 +745,8 @@
     }
     function zeroTwist() { return {linear: {x: 0, y: 0, z: 0}, angular: {x: 0, y: 0, z: 0}}; }
     function arrowMotion(x, y) {
-      const linear = y < 0 ? -y * .30 : -y * .22;
-      return {linear: {x: linear, y: 0, z: 0}, angular: {x: 0, y: 0, z: x * .55}};
+      const linear = -y * .15;
+      return {linear: {x: linear, y: 0, z: 0}, angular: {x: 0, y: 0, z: x * .30}};
     }
     function isArrowKey(key) {
       return key === 'ArrowUp' || key === 'ArrowDown' || key === 'ArrowLeft' || key === 'ArrowRight';

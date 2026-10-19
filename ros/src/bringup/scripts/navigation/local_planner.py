@@ -160,10 +160,37 @@ class LocalPlanner:
         local, world = self._trajectories(pose, command)
         return self._safe_trajectory(local, world, obstacles)
 
+    def _front_clearance_safe(
+        self, trajectory: Sequence[Pose2D], obstacles: Sequence[Point2D]
+    ) -> bool:
+        config = self.config
+        front_x = config.robot_front_extent_m
+        corridor_half_width = config.robot_half_width_m + config.local_safety_margin_m
+
+        for obstacle in obstacles:
+            initially_ahead = (
+                obstacle.x >= front_x and abs(obstacle.y) <= corridor_half_width
+            )
+            initial_gap = obstacle.x - front_x
+            required_gap = (
+                min(config.front_obstacle_clearance_m, initial_gap)
+                if initially_ahead else config.front_obstacle_clearance_m
+            )
+            for pose in trajectory:
+                dx, dy = obstacle.x - pose.x, obstacle.y - pose.y
+                cosine, sine = math.cos(pose.yaw), math.sin(pose.yaw)
+                forward = dx * cosine + dy * sine
+                lateral = -dx * sine + dy * cosine
+                if (forward >= front_x and abs(lateral) <= corridor_half_width
+                        and forward - front_x + 1e-9 < required_gap):
+                    return False
+        return True
+
     def _safe_trajectory(
         self, local: Sequence[Pose2D], world: Sequence[Pose2D], obstacles: Sequence[Point2D]
     ) -> tuple[bool, float]:
-        if not self._map_safe(world):
+        if (not self._map_safe(world)
+                or not self._front_clearance_safe(local, obstacles)):
             return False, 0.0
         clearance = min(min_distance(item.to_point(), obstacles) for item in local)
         required = min(

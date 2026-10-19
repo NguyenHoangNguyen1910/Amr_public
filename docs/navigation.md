@@ -335,6 +335,13 @@ Các trọng số DWA, lookahead, prediction horizon, sample count và clearance
 copy làm điểm bắt đầu nhưng phải benchmark trên Raspberry Pi 5 và tune với vận
 tốc thấp của robot thật.
 
+`front_obstacle_clearance_m` đặt khoảng hở phía trước tính từ mũi robot. Planner
+chỉ áp dụng khoảng hở này cho scan points nằm trong hành lang rộng bằng thân
+robot cộng `local_safety_margin_m`; khoảng hở quanh hai bên vẫn do bán kính và
+local margin hiện tại quyết định. `robot_front_extent_m` và
+`robot_half_width_m` được đo từ `base_footprint`. Kiểm tra phía trước dùng dữ
+liệu của `scan_topic`; depth camera preview không phải đầu vào tránh vật cản.
+
 Khi chạy qua `shell.sh`, launch đọc trực tiếp
 `/workspace/src/bringup/config/navigation.yaml`. Sửa file này rồi restart launch
 để áp dụng, không cần build lại. Có thể chọn file khác bằng

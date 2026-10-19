@@ -382,6 +382,43 @@ class NavigationCoreTest(unittest.TestCase):
             facing_obstacle, Velocity(0.10, 0.0), (Point2D(0.10, 0.0),)
         )[0])
 
+    def test_front_clearance_rejects_approach_but_keeps_side_clearance(self):
+        config = replace(
+            self.config,
+            front_obstacle_clearance_m=0.60,
+            robot_front_extent_m=0.08,
+            robot_half_width_m=0.08,
+        )
+        local = LocalPlanner(CostMap(self.grid, obstacle_ttl_seconds=2.0), config)
+        pose = Pose2D(0.0, 0.0, 0.0)
+
+        front_safe, _ = local._safe_command(
+            pose, Velocity(0.10, 0.0), (Point2D(0.70, 0.0),)
+        )
+        side_safe, _ = local._safe_command(
+            pose, Velocity(0.10, 0.0), (Point2D(0.30, 0.20),)
+        )
+
+        self.assertFalse(front_safe)
+        self.assertTrue(side_safe)
+
+    def test_front_clearance_allows_reversing_away_when_already_inside(self):
+        config = replace(
+            self.config,
+            front_obstacle_clearance_m=0.60,
+            robot_front_extent_m=0.08,
+            robot_half_width_m=0.08,
+        )
+        local = LocalPlanner(CostMap(self.grid, obstacle_ttl_seconds=2.0), config)
+        pose = Pose2D(0.0, 0.0, 0.0)
+        obstacle = (Point2D(0.50, 0.0),)
+
+        forward_safe, _ = local._safe_command(pose, Velocity(0.10, 0.0), obstacle)
+        reverse_safe, _ = local._safe_command(pose, Velocity(-0.10, 0.0), obstacle)
+
+        self.assertFalse(forward_safe)
+        self.assertTrue(reverse_safe)
+
 
 if __name__ == "__main__":
     unittest.main()
