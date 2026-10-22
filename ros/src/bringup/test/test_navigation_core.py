@@ -345,6 +345,20 @@ class NavigationCoreTest(unittest.TestCase):
         self.assertEqual(result.state, State.NAVIGATING)
         self.assertGreater(result.command.linear, 0.0)
 
+    def test_local_ranking_preserves_first_command_on_exact_tie(self):
+        cost_map = CostMap(self.grid, obstacle_ttl_seconds=2.0)
+        local = LocalPlanner(cost_map, self.config)
+        goal = Point2D(1.0, 0.0)
+        planner = GlobalPlanner(cost_map, goal, self.config)
+        pose = Pose2D(0.0, 0.0, 0.0)
+        with (
+            patch.object(local, "_window", return_value=((0.1,), (-0.2, 0.2))),
+            patch.object(local, "_score", return_value=1.0),
+        ):
+            decision = local.command(pose, STOP, (goal,), (), planner, goal, False)
+        self.assertTrue(decision.safe)
+        self.assertEqual(decision.command, Velocity(0.1, -0.2))
+
     def test_inflated_start_can_turn_without_relaxing_collision_checks(self):
         cost_map = CostMap(self.grid, obstacle_ttl_seconds=2.0)
         cost_map.update_world_obstacles((Point2D(0.05, 0.05),), now=0.0)
@@ -367,6 +381,43 @@ class NavigationCoreTest(unittest.TestCase):
         self.assertFalse(local._safe_command(
             facing_obstacle, Velocity(0.10, 0.0), (Point2D(0.10, 0.0),)
         )[0])
+
+    def test_front_clearance_rejects_approach_but_keeps_side_clearance(self):
+        config = replace(
+            self.config,
+            front_obstacle_clearance_m=0.60,
+            robot_front_extent_m=0.08,
+            robot_half_width_m=0.08,
+        )
+        local = LocalPlanner(CostMap(self.grid, obstacle_ttl_seconds=2.0), config)
+        pose = Pose2D(0.0, 0.0, 0.0)
+
+        front_safe, _ = local._safe_command(
+            pose, Velocity(0.10, 0.0), (Point2D(0.70, 0.0),)
+        )
+        side_safe, _ = local._safe_command(
+            pose, Velocity(0.10, 0.0), (Point2D(0.30, 0.20),)
+        )
+
+        self.assertFalse(front_safe)
+        self.assertTrue(side_safe)
+
+    def test_front_clearance_allows_reversing_away_when_already_inside(self):
+        config = replace(
+            self.config,
+            front_obstacle_clearance_m=0.60,
+            robot_front_extent_m=0.08,
+            robot_half_width_m=0.08,
+        )
+        local = LocalPlanner(CostMap(self.grid, obstacle_ttl_seconds=2.0), config)
+        pose = Pose2D(0.0, 0.0, 0.0)
+        obstacle = (Point2D(0.50, 0.0),)
+
+        forward_safe, _ = local._safe_command(pose, Velocity(0.10, 0.0), obstacle)
+        reverse_safe, _ = local._safe_command(pose, Velocity(-0.10, 0.0), obstacle)
+
+        self.assertFalse(forward_safe)
+        self.assertTrue(reverse_safe)
 
 
 if __name__ == "__main__":

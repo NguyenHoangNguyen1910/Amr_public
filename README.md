@@ -1,144 +1,109 @@
+# AMR
 
-# robot_nav
+ROS 2 AMR stack for Raspberry Pi 5, using the ARM64 Yahboom image and an
+Astra depth camera.
 
-Luồng mapping hiện tại là:
+Kiến trúc hiện tại lấy encoder + IMU làm odometry chính. RGB-D VO là tùy chọn,
+tắt mặc định và chỉ bổ sung vận tốc tịnh tiến sau gate. Xem
+[kiến trúc và cấu hình](docs/architecture.md).
+
+Kiểm thử không kết nối phần cứng robot:
+
+```bash
+./tools/verify_architecture.sh
+```
+
+## Chạy mapping RGB-D
+
+Mapping mặc định dùng driver Astra chuẩn trong container
+`astra-camera-slam`, image `husarion/astra:humble-nightly`. `shell.sh` tự
+pull, tạo và khởi động container này; Web stack chạy trong ROS container
+chính và nhận topic qua ROS 2 DDS.
+
+Build image chỉ cần chạy lần đầu hoặc sau khi sửa ROS code:
+
+```bash
+./shell.sh build
+```
+
+Terminal 1:
+
+```bash
+./shell.sh bootstrap
+./shell.sh rtabmap
+./shell.sh run
+```
+
+`rgbd_sync` đồng bộ ảnh đã đăng ký depth sang RGB và xuất `/camera/rgbd_image`.
+RTAB-Map nhận RGB-D này cùng `/odom` từ EKF, không chờ VO hoặc `odom_info`.
+Lệnh `run` mặc định dùng map `/rtabmap/map`, tắt SLAM Toolbox và cho navigation
+đọc `/depth/scan` từ depth obstacle adapter. Astra chạy 640×480 ở 15 FPS,
+tắt IR và point cloud; mapper xử lý khoảng 1 Hz, queue 3. Depth preview giảm
+xuống 5 Hz. Những mức này là cấu hình khởi đầu, chưa phải cam kết độ trễ thực tế.
+
+VO tùy chọn chạy tối đa 5 Hz, không phát TF và không gửi pose/yaw vào EKF:
+
+```bash
+ENABLE_VO=true ./shell.sh rtabmap
+```
+
+Các số đo camera/thân robot trong `ros/src/bringup/config/geometry.yaml` được
+để bằng 0 theo yêu cầu. `motion_monitor` chỉ xuất cảnh báo ở `/motion/status`,
+không chặn lệnh và không phát `/cmd_vel`. Arbiter vẫn là node phát lệnh cuối.
+
+Nếu không cần navigation và chỉ muốn chạy mapping/teleop, chạy web stack bằng:
+
+```bash
+USE_NAVIGATION=false ./shell.sh run
+```
+
+Terminal 2, chạy Web UI:
+
+```bash
+./shell.sh serve_web
+```
+
+Mở trình duyệt tại `http://<ROBOT_IP>:8080/index.html`.
+Lấy IP robot bằng:
+
+```bash
+hostname -I
+```
+
+Map 2D được publish ở `/rtabmap/map`. Cần đo độ trễ và sai số thực tế sau khi
+hiệu chỉnh camera và kiểm chứng odometry; depth preview cập nhật riêng.
+
+Mặc định RTAB-Map chạy theo phiên: database nằm trên `/dev/shm` và bị xóa
+khi phiên mới bắt đầu, nên không ghi database xuống thẻ nhớ. Chế độ này vẫn
+giữ pose graph/map trong suốt thời gian robot đang chạy.
+
+Nếu cần lưu database để phân tích hoặc tiếp tục phiên sau, bật:
+
+```bash
+RTABMAP_PERSIST=true ./shell.sh rtabmap
+```
+
+Chế độ persistent lưu trong thư mục `rtabmap_data/`, theo tên
+`RTABMAP_DATABASE_NAME` (mặc định là tên database có timestamp):
 
 ```text
-Astra RGB + depth + /odom -> RTAB-Map -> /rtabmap/map -> web_bridge -> Web UI
+rtabmap_data/<RTABMAP_DATABASE_NAME>
 ```
 
-RTAB-Map dùng depth gốc `/camera/depth/image_raw` và odometry bánh xe `/odom`.
-LiDAR không cần cho luồng này.
-
-## Chạy robot thật
-
-Chạy các bước sau theo thứ tự. `build.sh` phải chạy trước khi khởi động
-backend để container dùng đúng launch file mới.
-
-### Terminal 1: build, camera và micro-ROS
+Xem log RTAB-Map:
 
 ```bash
-cd ~/quangnv/robot_nav
-./build.sh
-docker start astra-camera-slam 2>/dev/null || true
-ROS_LOCALHOST_ONLY=0 AUTO_RESET=1 ./bootstrap.sh
+docker logs -f rtabmap-slam
 ```
 
-Kiểm tra camera:
+Database phiên trên `/dev/shm` dùng RAM thay vì storage; cần theo dõi dung
+lượng RAM nếu mapping trong thời gian dài.
+
+
+## Stop
 
 ```bash
-docker exec astra-camera-slam bash -lc '
-  source /opt/ros/humble/setup.bash
-  export ROS_DOMAIN_ID=20 ROS_LOCALHOST_ONLY=0
-  ros2 topic hz /camera/color/image_raw
-'
+./shell.sh stop
 ```
 
-Depth phải tồn tại:
-
-```bash
-docker exec astra-camera-slam bash -lc '
-  source /opt/ros/humble/setup.bash
-  export ROS_DOMAIN_ID=20 ROS_LOCALHOST_ONLY=0
-  ros2 topic list | grep /camera/depth/image_raw
-'
-```
-
-### Terminal 2: RTAB-Map
-
-```bash
-cd ~/quangnv/robot_nav
-./rtabmap.sh
-```
-
-Script tự cấu hình:
-
-- `visual_odometry:=false`
-- `odom_topic:=/odom`
-- `frame_id:=base_link`
-- `depth_topic:=/camera/depth/image_raw`
-- database: `rtabmap_data/astra_wheel_mapping.db`
-
-Log đúng phải có dòng tương tự:
-
-```text
-rtabmap subscribed to (approx sync):
-   /odom
-   /camera/color/image_raw
-   /camera/depth/image_raw
-   /camera/color/camera_info
-```
-
-### Terminal 3: backend ROS và rosbridge
-
-```bash
-cd ~/quangnv/robot_nav
-./shell.sh
-```
-
-Trong container:
-
-```bash
-ros2 launch bringup web.launch.py use_rtabmap_depth_adapter:=false
-```
-
-Launch này đồng thời phát TF `base_link -> camera_link`, cần thiết để
-RTAB-Map ghép depth với odometry. Mặc định offset camera bằng 0 để bảo đảm
-chuỗi TF nối được; khi biết chính xác vị trí camera, truyền offset thật, ví dụ:
-
-```bash
-ros2 launch bringup web.launch.py \
-  use_rtabmap_depth_adapter:=false \
-  camera_mount_x:=0.10 camera_mount_z:=0.20
-```
-
-Không mở launch backend lần thứ hai. Nếu gặp `Address already in use` ở port
-9090, nghĩa là rosbridge cũ vẫn đang chạy; dùng lại terminal/container đang
-chạy thay vì start thêm một launch.
-
-### Terminal 4: Web UI
-
-```bash
-cd ~/quangnv/robot_nav
-./serve_web.sh
-```
-
-Mở địa chỉ mà script in ra, thường là `http://<IP-Raspberry-Pi>:8080/`.
-
-## Kiểm tra trước khi mapping
-
-Trong container backend, các topic sau phải có dữ liệu:
-
-```bash
-ros2 topic hz /odom
-ros2 topic hz /camera/color/image_raw
-ros2 topic hz /camera/depth/image_raw
-```
-
-Nếu RTAB-Map báo `Did not receive data since 5 seconds`, hãy kiểm tra cả ba
-topic và timestamp của chúng. Có publisher trong `ros2 topic info` nhưng không
-có message vẫn chưa đủ để mapping.
-
-Khi robot đứng yên, map chỉ có thể tạo vùng quan sát ban đầu. Hãy cho robot
-di chuyển chậm qua khu vực cần quét; `/odom` phải thay đổi theo chuyển động.
-Nếu robot đi ra ngoài OccupancyGrid rồi biến mất trên UI, đó là dấu hiệu
-RTAB-Map chưa nhận được frame đồng bộ hoặc odometry, không phải do UI tự đặt
-một kích thước map cố định.
-
-## Lưu database/map
-
-Database mapping được lưu tại:
-
-```text
-rtabmap_data/astra_wheel_mapping.db
-```
-
-Để bắt đầu một session sạch mà vẫn giữ session cũ:
-
-```bash
-RTABMAP_DATABASE_NAME=astra_wheel_mapping_new.db ./rtabmap.sh
-```
-
-Các file `.pgm/.yaml` cũ trong `maps/` là map tĩnh của ROS và không tự động
-được cập nhật từ database RTAB-Map. Luồng web hiện hiển thị trực tiếp
-`/rtabmap/map` thông qua `/web/map`.
+Lệnh `stop` dừng ROS, micro-ROS agent và RTAB-Map.

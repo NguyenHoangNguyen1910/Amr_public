@@ -22,14 +22,15 @@ Nếu trang được phục vụ qua HTTPS, frontend dùng `wss://` thay cho `ws
 | `realtimeRos` | Pose robot, LiDAR packed và trạng thái navigation |
 | `bulkRos` | Map và path |
 
-Camera được phục vụ riêng qua HTTP MJPEG tại:
+Depth camera được phục vụ riêng qua binary WebSocket tại:
 
 ```text
-http://<hostname>:8081/camera.mjpg
+ws://<hostname>:8082/ws/depth
 ```
 
-Frontend kiểm tra trạng thái camera mỗi 2 giây qua
-`http://<hostname>:8081/healthz`.
+WebSocket gửi metadata JSON một lần, sau đó gửi binary `uint8-depth` kích thước
+320×240. Browser tô màu frame trên canvas theo cùng thang màu với `read.py`.
+Server bật `permessage-deflate`; browser tự negotiate extension này.
 
 ## Các topic subscribe
 
@@ -37,7 +38,7 @@ Frontend kiểm tra trạng thái camera mỗi 2 giây qua
 |---|---|---:|---|
 | `/web/map` | `nav_msgs/msg/OccupancyGrid` | 500 ms | Nhận occupancy grid chỉ khi map mới/thay đổi và vẽ nền map |
 | `/robot_pose` | `geometry_msgs/msg/PoseStamped` | 50 ms | Nhận vị trí/hướng robot, vẽ robot màu xanh và xác nhận robot đã được định vị |
-| `/web/scan_points` | `bringup/msg/ScanPoints` | 200 ms | Nhận LiDAR packed trên realtime socket và vẽ màu cam |
+| `/web/scan_points` | `bringup/msg/ScanPoints` | 200 ms | Nhận depth scan packed trên realtime socket và vẽ màu cam |
 | `/plan` | `nav_msgs/msg/Path` | 250 ms | Nhận đường đi navigation và vẽ màu xanh tím |
 | `/web/nav_status` | `std_msgs/msg/String` | 0 | Nhận trạng thái điều hướng tới goal |
 
@@ -159,12 +160,21 @@ Các trạng thái được frontend xử lý:
 
 Frontend không tự tính khoảng cách robot-goal. Việc robot đã tới goal được xác định qua `state = "SUCCEEDED"` từ topic này.
 
-### Camera MJPEG
+### Astra depth WebSocket
 
-Node `ros/src/bringup/scripts/camera_mjpeg.py` subscribe
-`/usb_cam/image_raw/compressed`, giữ lại frame JPEG mới nhất và phục vụ
-multipart HTTP tại `/camera.mjpg`. Frontend dùng trực tiếp URL này trong thẻ
-`<img>`, nên ảnh camera không đi qua rosbridge hoặc hai WebSocket của UI.
+Driver `astra_camera` trong container `astra-camera-slam` sở hữu thiết bị và
+publish các topic raw. Node `depth_websocket.py` trong ROS container nhận
+depth từ driver và phục vụ preview:
+
+```text
+/camera/color/image_raw   sensor_msgs/msg/Image, rgb8
+/camera/depth/image_raw   sensor_msgs/msg/Image, 16UC1
+```
+
+`depth_websocket.py` giữ frame depth preview mới nhất và phục vụ
+`/ws/depth` trên port `8082`. Payload binary là một byte/pixel; giá trị `0`
+là pixel không hợp lệ, còn các giá trị `1..255` được UI map sang màu đỏ-vàng-
+xanh-lam-đen.
 
 ## Các topic publish
 
@@ -275,7 +285,7 @@ Bấm Set Goal
 
 ```text
 /map  -> web_bridge -> /web/map         -> bulkRos     -> map canvas
-/scan -> web_bridge -> /web/scan_points -> realtimeRos -> scan canvas
+/depth/scan -> web_bridge -> /web/scan_points -> realtimeRos -> scan canvas
 TF map -> base_footprint
       -> web_bridge -> /robot_pose       -> realtimeRos -> overlay canvas
 
@@ -284,6 +294,6 @@ Navigation -> /cmd_vel_nav --------------------------------------+-> cmd_vel_arb
 Web UI       -> /web/control_mode --------------------------------+
 ```
 
-`web_bridge.py`, `camera_mjpeg.py` và `cmd_vel_arbiter.py` là ba process độc
-lập. `msg/ScanPoints.msg` chỉ định nghĩa schema ROS và không tạo thêm process
+`web_bridge.py` và `cmd_vel_arbiter.py` là hai process độc lập.
+`msg/ScanPoints.msg` chỉ định nghĩa schema ROS và không tạo thêm process
 runtime.

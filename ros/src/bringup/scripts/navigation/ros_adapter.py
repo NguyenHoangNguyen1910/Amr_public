@@ -26,6 +26,7 @@ from sensor_msgs.msg import LaserScan
 from tf2_ros import Buffer, TransformException, TransformListener
 
 from bringup.action import NavigateToPose
+from amr_perception.core import fresh
 from .config import DEFAULT_CONFIG, NavigationConfig
 from .global_planner import OccupancyGrid
 from .navigator import Navigator
@@ -105,9 +106,9 @@ class NavigationNode(Node):
 
         self.map_frame = str(self._parameter("map_frame", "map"))
         self.base_frame = str(self._parameter("base_frame", "base_footprint"))
-        self.laser_frame = str(self._parameter("laser_frame", "laser_frame"))
+        self.laser_frame = str(self._parameter("laser_frame", "base_footprint"))
         self.map_topic = str(self._parameter("map_topic", "/map"))
-        self.scan_topic = str(self._parameter("scan_topic", "/scan"))
+        self.scan_topic = str(self._parameter("scan_topic", "/depth/scan"))
         self.odom_topic = str(self._parameter("odom_topic", "/odom"))
         self.cmd_vel_topic = str(self._parameter("cmd_vel_topic", "/cmd_vel_nav"))
         self.plan_topic = str(self._parameter("plan_topic", "/plan"))
@@ -213,7 +214,7 @@ class NavigationNode(Node):
             self._latest_odom = message
             self._odom_received_at = time.monotonic()
 
-    def navigation_input(self) -> NavigationInput:
+    def _fresh_sensor_snapshot(self) -> tuple[LaserScan, Odometry]:
         with self._sensor_lock:
             scan = self._latest_scan
             odometry = self._latest_odom
@@ -230,7 +231,18 @@ class NavigationNode(Node):
             raise SensorDataError("odometry has not been received")
         if now - odom_time > timeout:
             raise SensorDataError("odometry is stale")
+        # Receipt time alone accepts buffered/replayed stale messages. EKF may
+        # also keep predicting after raw inputs stop; motion_monitor reports
+        # raw wheel/IMU health independently, without intercepting commands.
+        ros_now = self.get_clock().now().nanoseconds * 1e-9
+        for label, message in (("scan", scan), ("odometry", odometry)):
+            stamp = Time.from_msg(message.header.stamp).nanoseconds * 1e-9
+            if not fresh(stamp, ros_now, timeout):
+                raise SensorDataError(label + " source timestamp is stale/future/zero")
+        return scan, odometry
 
+    def navigation_input(self) -> NavigationInput:
+        scan, odometry = self._fresh_sensor_snapshot()
         stamp = self._scan_stamp(scan)
         return NavigationInput(
             self._map_pose(stamp),
@@ -347,6 +359,66 @@ class NavigationNode(Node):
                 self.get_logger().warning(f"Navigation cancel failed: {error}")
         return CancelResponse.ACCEPT
 
+    def _refresh_active_map(
+        self, navigator: Navigator, map_message: RosOccupancyGrid
+    ) -> RosOccupancyGrid:
+        with self._mission_lock:
+            latest_map = self._latest_map
+        if latest_map is not map_message:
+            if latest_map.header.frame_id and latest_map.header.frame_id != self.map_frame:
+                raise SensorDataError("occupancy map is not in the configured map frame")
+            navigator.update_map(occupancy_grid_from_ros(
+                latest_map, self.config, self.occupied_threshold
+            ))
+            return latest_map
+        return map_message
+
+    def _log_navigation_abort(self, navigator: Navigator, result, goal_point: Point2D) -> None:
+        remaining = math.hypot(goal_point.x - result.pose.x, goal_point.y - result.pose.y)
+        yaw_error = (None if goal_point.yaw is None else
+                     math.atan2(math.sin(goal_point.yaw - result.pose.yaw),
+                                math.cos(goal_point.yaw - result.pose.yaw)))
+        self.get_logger().error(
+            f"Navigation aborted: {navigator.blocked_reason or result.state.value}; "
+            f"phase={navigator.phase.value}, distance={remaining:.3f} m, "
+            f"yaw_error_rad={yaw_error}, goal=({goal_point.x:.3f}, {goal_point.y:.3f}, "
+            f"{goal_point.yaw}), pose=({result.pose.x:.3f}, {result.pose.y:.3f}, "
+            f"{result.pose.yaw:.3f})"
+        )
+
+    def _run_navigation_loop(
+        self, goal_handle, navigator: Navigator,
+        map_message: RosOccupancyGrid, goal_point: Point2D,
+    ):
+        while not self._shutdown:
+            cycle_start = time.monotonic()
+            if goal_handle.is_cancel_requested:
+                navigator.cancel()
+                goal_handle.canceled()
+                return NavigateToPose.Result()
+            map_message = self._refresh_active_map(navigator, map_message)
+            result = navigator.step(self.navigation_input())
+            if goal_handle.is_cancel_requested:
+                navigator.cancel()
+                goal_handle.canceled()
+                return NavigateToPose.Result()
+            if self._shutdown:
+                break
+            self.publish_velocity(result.command.linear, result.command.angular)
+            self._publish_plan(result.path, goal_point.yaw)
+            if result.state is State.SUCCEEDED:
+                goal_handle.succeed()
+                return NavigateToPose.Result()
+            if result.state.value in _FAILED_STATES:
+                self._log_navigation_abort(navigator, result, goal_point)
+                goal_handle.abort()
+                return NavigateToPose.Result()
+            time.sleep(max(0.0, 1.0 / self.config.control_hz - (time.monotonic() - cycle_start)))
+
+        navigator.cancel()
+        goal_handle.canceled()
+        return NavigateToPose.Result()
+
     def _execute_callback(self, goal_handle):
         navigator: Navigator | None = None
         try:
@@ -379,52 +451,7 @@ class NavigationNode(Node):
                 self.publish_stop()
                 goal_handle.canceled()
                 return NavigateToPose.Result()
-            while not self._shutdown:
-                cycle_start = time.monotonic()
-                if goal_handle.is_cancel_requested:
-                    navigator.cancel()
-                    goal_handle.canceled()
-                    return NavigateToPose.Result()
-                with self._mission_lock:
-                    latest_map = self._latest_map
-                if latest_map is not map_message:
-                    if latest_map.header.frame_id and latest_map.header.frame_id != self.map_frame:
-                        raise SensorDataError("occupancy map is not in the configured map frame")
-                    navigator.update_map(occupancy_grid_from_ros(
-                        latest_map, self.config, self.occupied_threshold
-                    ))
-                    map_message = latest_map
-                result = navigator.step(self.navigation_input())
-                if goal_handle.is_cancel_requested:
-                    navigator.cancel()
-                    goal_handle.canceled()
-                    return NavigateToPose.Result()
-                if self._shutdown:
-                    break
-                self.publish_velocity(result.command.linear, result.command.angular)
-                self._publish_plan(result.path, goal_point.yaw)
-                if result.state is State.SUCCEEDED:
-                    goal_handle.succeed()
-                    return NavigateToPose.Result()
-                if result.state.value in _FAILED_STATES:
-                    remaining = math.hypot(goal_point.x - result.pose.x, goal_point.y - result.pose.y)
-                    yaw_error = (None if goal_point.yaw is None else
-                                 math.atan2(math.sin(goal_point.yaw - result.pose.yaw),
-                                            math.cos(goal_point.yaw - result.pose.yaw)))
-                    self.get_logger().error(
-                        f"Navigation aborted: {navigator.blocked_reason or result.state.value}; "
-                        f"phase={navigator.phase.value}, distance={remaining:.3f} m, "
-                        f"yaw_error_rad={yaw_error}, goal=({goal_point.x:.3f}, {goal_point.y:.3f}, "
-                        f"{goal_point.yaw}), pose=({result.pose.x:.3f}, {result.pose.y:.3f}, "
-                        f"{result.pose.yaw:.3f})"
-                    )
-                    goal_handle.abort()
-                    return NavigateToPose.Result()
-                time.sleep(max(0.0, 1.0 / self.config.control_hz - (time.monotonic() - cycle_start)))
-
-            navigator.cancel()
-            goal_handle.canceled()
-            return NavigateToPose.Result()
+            return self._run_navigation_loop(goal_handle, navigator, map_message, goal_point)
         except Exception as error:
             self.publish_stop()
             self.get_logger().error(f"Navigation action failed: {error}")

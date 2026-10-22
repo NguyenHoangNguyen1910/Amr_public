@@ -1,6 +1,8 @@
 """Launch the robot web-control stack."""
 
 import os
+import math
+import yaml
 
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
@@ -10,7 +12,7 @@ from launch.launch_description_sources import (
     FrontendLaunchDescriptionSource,
     PythonLaunchDescriptionSource,
 )
-from launch.substitutions import LaunchConfiguration, PythonExpression
+from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
 
 
@@ -19,135 +21,94 @@ def generate_launch_description():
     slam_params = os.path.join(
         bringup_share, 'config', 'slam.yaml')
     navigation_config = LaunchConfiguration('navigation_config')
-    robot_backend = LaunchConfiguration('robot_backend')
-    hardware_backend = IfCondition(PythonExpression([
-        "'", robot_backend, "' == 'hardware'",
-    ]))
-    simulation_backend = IfCondition(PythonExpression([
-        "'", robot_backend, "' == 'simulation'",
-    ]))
-    hardware_camera = IfCondition(PythonExpression([
-        "'", robot_backend, "' == 'hardware' and '",
-        LaunchConfiguration('use_camera'), "'.lower() in ('true', '1', 'yes')",
-    ]))
-    camera_stream = IfCondition(PythonExpression([
-        "'", robot_backend, "' == 'hardware' and (('",
-        LaunchConfiguration('use_camera'),
-        "'.lower() in ('true', '1', 'yes')) or ('",
-        LaunchConfiguration('use_depth_camera'),
-        "'.lower() in ('true', '1', 'yes')))",
-    ]))
-    depth_adapter = IfCondition(PythonExpression([
-        "'", robot_backend, "' == 'hardware' and '",
-        LaunchConfiguration('use_rtabmap_depth_adapter'),
-        "'.lower() in ('true', '1', 'yes')",
-    ]))
-    lidar_slam = IfCondition(PythonExpression([
-        "'", robot_backend, "' == 'hardware' and '",
-        LaunchConfiguration('use_lidar_slam'),
-        "'.lower() in ('true', '1', 'yes')",
-    ]))
-    camera_params = os.path.join(
-        get_package_share_directory('usb_cam'), 'config', 'params_1.yaml')
-
+    with open(os.path.join(bringup_share, 'config', 'geometry.yaml')) as stream:
+        geometry = yaml.safe_load(stream)
+    for key, value in geometry.items():
+        if key != 'calibration_confirmed' and not math.isfinite(float(value)):
+            raise ValueError('geometry must contain finite measurements')
+    perception_config = os.path.join(bringup_share, 'config', 'perception.yaml')
+    front = float(geometry['robot_front_extent_m'])
+    rear = float(geometry['robot_rear_extent_m'])
+    half = float(geometry['robot_half_width_m'])
+    measured_footprint = ({
+        'robot_front_extent_m': front, 'robot_half_width_m': half,
+        'robot_radius_m': math.hypot(max(front, rear), half),
+    } if min(front, rear, half) > 0 else {})
     return LaunchDescription([
         DeclareLaunchArgument(
-            'use_camera', default_value='false',
-            description='Start USB camera when available'),
+            'use_depth_websocket', default_value='true',
+            description='Serve the Astra depth topic through WebSocket'),
         DeclareLaunchArgument(
-            'use_depth_camera', default_value='true',
-            description='Serve the Astra depth camera in the web UI'),
+            'depth_websocket_topic', default_value='/camera/depth/image_raw',
+            description='Depth topic served by the WebSocket preview'),
         DeclareLaunchArgument(
-            'camera_stream_topic', default_value='/camera/depth/image_raw',
-            description='ROS image topic served by camera_mjpeg'),
+            'depth_websocket_port', default_value='8082',
+            description='TCP port for the depth WebSocket preview'),
         DeclareLaunchArgument(
-            'camera_stream_mode', default_value='depth',
-            description='camera_mjpeg input mode: depth or compressed'),
+            'depth_websocket_hz', default_value='5.0',
+            description='Maximum depth preview publish rate'),
         DeclareLaunchArgument(
-            'use_rtabmap_depth_adapter', default_value='false',
-            description='Optionally publish canonical 32FC1 depth for RTAB-Map'),
+            'use_slam_toolbox', default_value='false',
+            description='Start LiDAR SLAM Toolbox alongside RTAB-Map'),
         DeclareLaunchArgument(
-            'rtabmap_depth_input_topic', default_value='/camera/depth/image_raw',
-            description='Raw depth topic consumed by the RTAB-Map adapter'),
-        DeclareLaunchArgument(
-            'rtabmap_depth_topic', default_value='/camera/depth/rtabmap',
-            description='Canonical 32FC1 depth topic for RTAB-Map'),
+            'use_navigation', default_value='true',
+            description='Start navigation using the projected depth scan'),
         DeclareLaunchArgument(
             'map_topic', default_value='/rtabmap/map',
-            description='Map topic forwarded to the web UI'),
-        DeclareLaunchArgument(
-            'camera_mount_x', default_value='0.0',
-            description='Camera_link x offset from base_link in metres'),
-        DeclareLaunchArgument(
-            'camera_mount_y', default_value='0.0',
-            description='Camera_link y offset from base_link in metres'),
-        DeclareLaunchArgument(
-            'camera_mount_z', default_value='0.0',
-            description='Camera_link z offset from base_link in metres'),
-        DeclareLaunchArgument(
-            'camera_mount_roll', default_value='0.0',
-            description='Camera_link roll from base_link in radians'),
-        DeclareLaunchArgument(
-            'camera_mount_pitch', default_value='0.0',
-            description='Camera_link pitch from base_link in radians'),
-        DeclareLaunchArgument(
-            'camera_mount_yaw', default_value='0.0',
-            description='Camera_link yaw from base_link in radians'),
-        DeclareLaunchArgument(
-            'use_lidar_slam', default_value='false',
-            description='Start slam_toolbox from LiDAR /scan'),
-        DeclareLaunchArgument(
-            'robot_backend', default_value='hardware',
-            description='Robot adapter: hardware or simulation',
-            choices=['hardware', 'simulation']),
+            description='OccupancyGrid topic used by web and navigation'),
+        *[DeclareLaunchArgument(key, default_value=str(geometry[key])) for key in (
+            'camera_mount_x', 'camera_mount_y', 'camera_mount_z',
+            'camera_mount_roll', 'camera_mount_pitch', 'camera_mount_yaw')],
         DeclareLaunchArgument(
             'slam_mode', default_value='mapping',
-            description='slam_toolbox mode for hardware: mapping or localization',
+            description='slam_toolbox mode: mapping or localization',
             choices=['mapping', 'localization']),
         DeclareLaunchArgument(
             'slam_posegraph', default_value='',
             description='Serialized pose graph basename used for localization'),
         DeclareLaunchArgument(
-            'sim_map',
-            default_value=os.path.join(bringup_share, 'maps', 'amr_world.json'),
-            description='Simulator .json world or ROS .yaml/.pgm map pair'),
-        DeclareLaunchArgument(
-            'sim_initial_x', default_value='-2.0',
-            description='Virtual robot initial map-frame x coordinate'),
-        DeclareLaunchArgument(
-            'sim_initial_y', default_value='-0.5',
-            description='Virtual robot initial map-frame y coordinate'),
-        DeclareLaunchArgument(
-            'sim_initial_yaw', default_value='0.0',
-            description='Virtual robot initial yaw in radians'),
-        DeclareLaunchArgument(
             'navigation_config',
             default_value='/workspace/src/bringup/config/navigation.yaml',
             description='Navigation parameter file'),
-        IncludeLaunchDescription(
-            PythonLaunchDescriptionSource(os.path.join(
-                get_package_share_directory('imu_complementary_filter'),
-                'launch', 'complementary_filter.launch.py')),
-            condition=hardware_backend),
+        Node(
+            package='imu_complementary_filter', executable='complementary_filter_node',
+            name='complementary_filter_gain_node', output='screen',
+            remappings=[('imu/data_raw', '/imu')],
+            parameters=[{'do_bias_estimation': True, 'do_adaptive_gain': True,
+                         'use_mag': False, 'publish_tf': False,
+                         'publish_debug_topics': True, 'bias_alpha': 0.01,
+                         'gain_acc': 0.01}],
+        ),
         IncludeLaunchDescription(
             PythonLaunchDescriptionSource(os.path.join(
                 get_package_share_directory('robot_localization'),
-                'launch', 'ekf.launch.py')),
-            condition=hardware_backend),
+                'launch', 'ekf.launch.py'))),
         Node(
             package='bringup',
             executable='imu_covariance_adapter.py',
             name='imu_covariance_adapter',
             output='screen',
-            condition=hardware_backend,
         ),
+        Node(package='bringup', executable='wheel_covariance_adapter.py',
+             name='wheel_covariance_adapter', output='screen'),
+        Node(package='bringup', executable='depth_obstacle_adapter.py',
+             name='depth_obstacle_adapter', output='screen',
+             parameters=[perception_config, {
+                 'calibration_confirmed': bool(geometry['calibration_confirmed'])}]),
+        # Advisory only, as requested: arbiter remains the sole /cmd_vel publisher.
+        Node(package='bringup', executable='motion_monitor.py',
+             name='motion_monitor', output='screen',
+             parameters=[perception_config, {
+                 'calibrated': bool(geometry['calibration_confirmed']),
+                 'front': front, 'rear': rear, 'half_width': half}]),
         Node(
             package='tf2_ros',
             executable='static_transform_publisher',
             name='base_footprint_to_base_link',
             arguments=[
-                '0', '0', '0.05', '0.0', '0.0', '0.0',
-                'base_footprint', 'base_link',
+                '--x', '0', '--y', '0', '--z', '0.05',
+                '--roll', '0', '--pitch', '0', '--yaw', '0',
+                '--frame-id', 'base_footprint', '--child-frame-id', 'base_link',
             ],
         ),
         Node(
@@ -155,8 +116,9 @@ def generate_launch_description():
             executable='static_transform_publisher',
             name='base_link_to_base_imu',
             arguments=[
-                '-0.002999', '-0.0030001', '0.031701', '0', '0', '0',
-                'base_link', 'imu_frame',
+                '--x', '-0.002999', '--y', '-0.0030001', '--z', '0.031701',
+                '--roll', '0', '--pitch', '0', '--yaw', '0',
+                '--frame-id', 'base_link', '--child-frame-id', 'imu_frame',
             ],
         ),
         Node(
@@ -175,16 +137,14 @@ def generate_launch_description():
             executable='static_transform_publisher',
             name='base_link_to_camera',
             arguments=[
-                LaunchConfiguration('camera_mount_x'),
-                LaunchConfiguration('camera_mount_y'),
-                LaunchConfiguration('camera_mount_z'),
-                LaunchConfiguration('camera_mount_roll'),
-                LaunchConfiguration('camera_mount_pitch'),
-                LaunchConfiguration('camera_mount_yaw'),
-                'base_link', 'camera_link',
+                '--x', LaunchConfiguration('camera_mount_x'),
+                '--y', LaunchConfiguration('camera_mount_y'),
+                '--z', LaunchConfiguration('camera_mount_z'),
+                '--roll', LaunchConfiguration('camera_mount_roll'),
+                '--pitch', LaunchConfiguration('camera_mount_pitch'),
+                '--yaw', LaunchConfiguration('camera_mount_yaw'),
+                '--frame-id', 'base_link', '--child-frame-id', 'camera_link',
             ],
-            output='screen',
-            condition=hardware_backend,
         ),
         Node(
             package='slam_toolbox',
@@ -199,27 +159,16 @@ def generate_launch_description():
                 },
             ],
             output='screen',
-            condition=lidar_slam,
-        ),
-        Node(
-            package='bringup',
-            executable='simulation_adapter.py',
-            name='simulation_adapter',
-            parameters=[{
-                'map_path': LaunchConfiguration('sim_map'),
-                'navigation_config_path': navigation_config,
-                'initial_x': LaunchConfiguration('sim_initial_x'),
-                'initial_y': LaunchConfiguration('sim_initial_y'),
-                'initial_yaw': LaunchConfiguration('sim_initial_yaw'),
-            }],
-            output='screen',
-            condition=simulation_backend,
+            condition=IfCondition(LaunchConfiguration('use_slam_toolbox')),
         ),
         Node(
             package='bringup',
             executable='web_bridge.py',
             name='web_bridge',
-            parameters=[{'transform_timeout': 0.30}],
+            parameters=[{
+                'transform_timeout': 0.05,
+                'use_scan': LaunchConfiguration('use_navigation'),
+            }],
             remappings=[
                 ('/map', LaunchConfiguration('map_topic')),
             ],
@@ -229,7 +178,11 @@ def generate_launch_description():
             package='bringup',
             executable='cmd_vel_arbiter.py',
             name='cmd_vel_arbiter',
-            parameters=[{'default_mode': 'manual'}],
+            parameters=[{
+                'default_mode': 'manual',
+                'manual_max_linear_x': 0.15,
+                'manual_max_angular_z': 0.30,
+            }],
             output='screen',
         ),
         Node(
@@ -237,46 +190,30 @@ def generate_launch_description():
             executable='navigation_node.py',
             name='navigation',
             output='screen',
-            parameters=[navigation_config],
+            remappings=[
+                ('/map', LaunchConfiguration('map_topic')),
+            ],
+            parameters=[
+                navigation_config,
+                {'map_topic': LaunchConfiguration('map_topic')},
+                measured_footprint,
+            ],
+            condition=IfCondition(LaunchConfiguration('use_navigation')),
         ),
         IncludeLaunchDescription(
             FrontendLaunchDescriptionSource(os.path.join(
                 get_package_share_directory('rosbridge_server'),
                 'launch', 'rosbridge_websocket_launch.xml'))),
         Node(
-            package='usb_cam',
-            executable='usb_cam_node_exe',
-            name='camera1',
-            parameters=[
-                camera_params,
-                {'framerate': 8.0, 'image_raw.jpeg_quality': 45},
-            ],
-            remappings=[
-                ('image_raw/compressed', 'usb_cam/image_raw/compressed'),
-            ],
-            output='screen',
-            condition=hardware_camera,
-        ),
-        Node(
             package='bringup',
-            executable='camera_mjpeg.py',
-            name='camera_mjpeg',
+            executable='depth_websocket.py',
+            name='depth_websocket',
             parameters=[{
-                'topic': LaunchConfiguration('camera_stream_topic'),
-                'mode': LaunchConfiguration('camera_stream_mode'),
+                'topic': LaunchConfiguration('depth_websocket_topic'),
+                'port': LaunchConfiguration('depth_websocket_port'),
+                'stream_hz': LaunchConfiguration('depth_websocket_hz'),
             }],
             output='screen',
-            condition=camera_stream,
-        ),
-        Node(
-            package='bringup',
-            executable='depth_rtabmap_adapter.py',
-            name='depth_rtabmap_adapter',
-            parameters=[{
-                'input_topic': LaunchConfiguration('rtabmap_depth_input_topic'),
-                'output_topic': LaunchConfiguration('rtabmap_depth_topic'),
-            }],
-            output='screen',
-            condition=depth_adapter,
+            condition=IfCondition(LaunchConfiguration('use_depth_websocket')),
         ),
     ])

@@ -1,3 +1,5 @@
+> Current hardware defaults: RTAB-Map `/rtabmap/map`, projected `/depth/scan`, encoder + IMU EKF; VO optional and off. See [architecture.md](architecture.md) for current startup, geometry and advisory-only monitoring. The sections below include the original planner design.
+
 # Navigation Integration
 
 ## 1. Mục tiêu
@@ -25,7 +27,7 @@ Kết quả mong muốn:
   vào `/cmd_vel`.
 - `cmd_vel_arbiter.py` vẫn là nơi duy nhất chọn manual/navigation, giới hạn vận
   tốc và publish `/cmd_vel` tới ESP32.
-- Dùng `/map` của `slam_toolbox`, pose từ TF và dữ liệu `/scan`, `/odom` hiện có.
+- Dùng `/map` của `slam_toolbox`, pose từ TF và dữ liệu `/depth/scan`, `/odom` hiện có.
 - Chỉ chạy một navigation node.
 
 ## 2. Ngoài phạm vi
@@ -58,7 +60,7 @@ web_bridge.py
 navigation_node.py
    ├── Global planner: Dijkstra cost-to-go
    ├── Local planner: DWA-lite
-   ├── subscribe /map, /scan, /odom
+   ├── subscribe /map, /depth/scan, /odom
    ├── lookup TF map -> base_footprint
    ├── publish /plan
    └── publish /cmd_vel_nav
@@ -117,7 +119,7 @@ Vai trò:
 | `ros/src/bringup/launch/web.launch.py` | Khởi chạy navigation node duy nhất |
 | `ros/src/bringup/CMakeLists.txt` | Cài executable, Python package và config SLAM |
 | `ros/src/bringup/package.xml` | Khai báo Python/NumPy và các ROS dependency trực tiếp của navigation node |
-| `build.sh` | Kiểm tra executable và module đã được cài đúng |
+| `shell.sh build` | Kiểm tra executable và module đã được cài đúng |
 | `README.md` | Cập nhật topology và lệnh chạy navigation |
 | `docs/web_topics.md` | Ghi rõ navigation node publish `/plan` và nhận goal qua local action |
 
@@ -197,7 +199,7 @@ coi trực tiếp là map pose. `/odom` cung cấp measured linear/angular veloc
 Một control cycle chỉ hợp lệ khi:
 
 - Có TF `map -> base_footprint`.
-- `/odom` và `/scan` đã được nhận.
+- `/odom` và `/depth/scan` đã được nhận.
 - Tuổi dữ liệu nhỏ hơn timeout cấu hình.
 - Tất cả giá trị dùng cho planner là finite.
 
@@ -209,7 +211,7 @@ trạng thái aborted.
 Navigation node subscribe:
 
 ```text
-/scan  sensor_msgs/msg/LaserScan
+/depth/scan  sensor_msgs/msg/LaserScan
 ```
 
 Scan được chuyển thành obstacle points trong frame `base_footprint` bằng TF tại
@@ -307,7 +309,7 @@ navigation:
   ros__parameters:
     map_frame: map
     base_frame: base_footprint
-    scan_topic: /scan
+    scan_topic: /depth/scan
     odom_topic: /odom
     map_topic: /map
     cmd_vel_topic: /cmd_vel_nav
@@ -334,6 +336,13 @@ navigation:
 Các trọng số DWA, lookahead, prediction horizon, sample count và clearance được
 copy làm điểm bắt đầu nhưng phải benchmark trên Raspberry Pi 5 và tune với vận
 tốc thấp của robot thật.
+
+`front_obstacle_clearance_m` đặt khoảng hở phía trước tính từ mũi robot. Planner
+chỉ áp dụng khoảng hở này cho scan points nằm trong hành lang rộng bằng thân
+robot cộng `local_safety_margin_m`; khoảng hở quanh hai bên vẫn do bán kính và
+local margin hiện tại quyết định. `robot_front_extent_m` và
+`robot_half_width_m` được đo từ `base_footprint`. Kiểm tra phía trước dùng dữ
+liệu của `scan_topic`; depth camera preview không phải đầu vào tránh vật cản.
 
 Khi chạy qua `shell.sh`, launch đọc trực tiếp
 `/workspace/src/bringup/config/navigation.yaml`. Sửa file này rồi restart launch
@@ -365,7 +374,7 @@ Các invariant bắt buộc:
 - Action loop là nơi duy nhất gọi planner/controller và publish command.
 - Mỗi input dùng pose `map -> base` tại timestamp của scan để pose và obstacle
   points cùng thời điểm.
-- Goal mới không được dùng map/pose/scan chưa sẵn sàng.
+- Goal mới không được dùng map/pose/depth/scan chưa sẵn sàng.
 - Unknown map cell không được coi là free.
 - Local planner kiểm tra cả inflated static map và obstacle points từ scan.
 - Log lỗi được throttle để tránh làm nghẽn Pi khi TF hoặc sensor mất liên tục.
@@ -392,7 +401,7 @@ không phụ thuộc riêng vào arbiter cho trạng thái action.
 
 ### Giai đoạn 2: ROS adapter và action server
 
-1. Triển khai subscriber `/map`, `/scan`, `/odom` và TF listener.
+1. Triển khai subscriber `/map`, `/depth/scan`, `/odom` và TF listener.
 2. Triển khai publisher `/cmd_vel_nav` và `/plan`.
 3. Triển khai `/navigate_to_pose` action server.
 4. Thêm cancel, shutdown và stale-sensor handling.
@@ -423,7 +432,7 @@ không phụ thuộc riêng vào arbiter cho trạng thái action.
 1. Nâng bánh xe hoặc ngắt motor power.
 2. Khởi động navigation backend và kiểm tra map/TF/sensor readiness.
 3. Gửi goal, quan sát `/plan`, action feedback và `/cmd_vel_nav`.
-4. Test Cancel, đóng browser, mất rosbridge, mất `/scan`, mất `/odom` và dừng
+4. Test Cancel, đóng browser, mất rosbridge, mất `/depth/scan`, mất `/odom` và dừng
    node bằng `Ctrl+C`.
 
 Điều kiện hoàn tất:
@@ -452,7 +461,7 @@ Chỉ tăng tốc hoặc tune DWA sau khi các case dừng an toàn đã pass.
 Build:
 
 ```bash
-./build.sh
+./shell.sh build
 ```
 
 Chạy navigation backend:
@@ -469,7 +478,7 @@ ros2 action info /navigate_to_pose
 ros2 topic info /cmd_vel_nav -v
 ros2 topic info /cmd_vel -v
 ros2 topic echo /plan --once
-ros2 topic hz /scan
+ros2 topic hz /depth/scan
 ros2 topic hz /odom
 ros2 run tf2_ros tf2_echo map base_footprint
 ```

@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import math
 from collections.abc import Sequence
-from dataclasses import dataclass
 
 import numpy as np
 
@@ -29,17 +28,6 @@ _ORIGIN = Point2D(0.0, 0.0)
 def _to_world(pose: Pose2D, local: Pose2D) -> Pose2D:
     point = transform_point(pose, local.to_point())
     return Pose2D(point.x, point.y, normalize_angle(pose.yaw + local.yaw))
-
-
-@dataclass(frozen=True)
-class _Candidate:
-    score: float
-    command: Velocity
-    clearance: float
-
-    @property
-    def rank(self) -> tuple[float, float, float, float]:
-        return self.score, self.clearance, self.command.linear, -abs(self.command.angular)
 
 
 class LocalPlanner:
@@ -79,24 +67,20 @@ class LocalPlanner:
     def _window(self, velocity: Velocity) -> tuple[tuple[float, ...], tuple[float, ...]]:
         config = self.config
         dt = 1.0 / config.control_hz
+        linear_delta = config.linear_acceleration_mps2 * dt
+        angular_delta = config.angular_acceleration_rps2 * dt
         linear_high = min(
-            config.default_linear_velocity_mps,
-            velocity.linear + config.linear_acceleration_mps2 * dt,
+            config.default_linear_velocity_mps, velocity.linear + linear_delta,
         )
         linear_low = min(
             linear_high,
-            max(
-                config.min_linear_velocity_mps,
-                velocity.linear - config.linear_acceleration_mps2 * dt,
-            ),
+            max(config.min_linear_velocity_mps, velocity.linear - linear_delta),
         )
         angular_low = max(
-            -config.max_angular_velocity_rps,
-            velocity.angular - config.angular_acceleration_rps2 * dt,
+            -config.max_angular_velocity_rps, velocity.angular - angular_delta,
         )
         angular_high = min(
-            config.max_angular_velocity_rps,
-            velocity.angular + config.angular_acceleration_rps2 * dt,
+            config.max_angular_velocity_rps, velocity.angular + angular_delta,
         )
         return (
             self._samples(linear_low, linear_high, config.linear_samples),
@@ -138,27 +122,30 @@ class LocalPlanner:
 
     def _terminal_command(self, pose: Pose2D, goal: Point2D) -> Velocity:
         config = self.config
-        distance_to_goal = distance(pose.to_point(), goal)
-        if distance_to_goal > config.goal_tolerance_m and not self.aligning_goal_yaw:
+        approaching = (
+            distance(pose.to_point(), goal) > config.goal_tolerance_m
+            and not self.aligning_goal_yaw
+        )
+        if approaching:
             target_yaw = math.atan2(goal.y - pose.y, goal.x - pose.x)
-            error = normalize_angle(target_yaw - pose.yaw)
-            angular = max(
-                -config.terminal_angular_velocity_rps,
-                min(config.terminal_angular_velocity_rps, config.terminal_heading_gain * error),
-            )
-            if abs(error) > config.terminal_heading_rotate_threshold_rad:
-                return Velocity(0.0, angular)
-            return Velocity(config.terminal_linear_velocity_mps, angular)
-        if goal.yaw is None:
+            gain = config.terminal_heading_gain
+        elif goal.yaw is None:
             return STOP
-        error = normalize_angle(goal.yaw - pose.yaw)
-        if abs(error) <= config.goal_yaw_tolerance_rad:
+        else:
+            target_yaw = goal.yaw
+            gain = config.terminal_yaw_gain
+        error = normalize_angle(target_yaw - pose.yaw)
+        if not approaching and abs(error) <= config.goal_yaw_tolerance_rad:
             return STOP
         angular = max(
             -config.terminal_angular_velocity_rps,
-            min(config.terminal_angular_velocity_rps, config.terminal_yaw_gain * error),
+            min(config.terminal_angular_velocity_rps, gain * error),
         )
-        return Velocity(0.0, angular)
+        linear = 0.0
+        if approaching:
+            linear = (0.0 if abs(error) > config.terminal_heading_rotate_threshold_rad
+                      else config.terminal_linear_velocity_mps)
+        return Velocity(linear, angular)
 
     def _obstacles(self, pose: Pose2D, points: Sequence[Point2D]) -> tuple[Point2D, ...]:
         return tuple(
@@ -173,10 +160,37 @@ class LocalPlanner:
         local, world = self._trajectories(pose, command)
         return self._safe_trajectory(local, world, obstacles)
 
+    def _front_clearance_safe(
+        self, trajectory: Sequence[Pose2D], obstacles: Sequence[Point2D]
+    ) -> bool:
+        config = self.config
+        front_x = config.robot_front_extent_m
+        corridor_half_width = config.robot_half_width_m + config.local_safety_margin_m
+
+        for obstacle in obstacles:
+            initially_ahead = (
+                obstacle.x >= front_x and abs(obstacle.y) <= corridor_half_width
+            )
+            initial_gap = obstacle.x - front_x
+            required_gap = (
+                min(config.front_obstacle_clearance_m, initial_gap)
+                if initially_ahead else config.front_obstacle_clearance_m
+            )
+            for pose in trajectory:
+                dx, dy = obstacle.x - pose.x, obstacle.y - pose.y
+                cosine, sine = math.cos(pose.yaw), math.sin(pose.yaw)
+                forward = dx * cosine + dy * sine
+                lateral = -dx * sine + dy * cosine
+                if (forward >= front_x and abs(lateral) <= corridor_half_width
+                        and forward - front_x + 1e-9 < required_gap):
+                    return False
+        return True
+
     def _safe_trajectory(
         self, local: Sequence[Pose2D], world: Sequence[Pose2D], obstacles: Sequence[Point2D]
     ) -> tuple[bool, float]:
-        if not self._map_safe(world):
+        if (not self._map_safe(world)
+                or not self._front_clearance_safe(local, obstacles)):
             return False, 0.0
         clearance = min(min_distance(item.to_point(), obstacles) for item in local)
         required = min(
@@ -233,7 +247,8 @@ class LocalPlanner:
         self.reset_terminal()
         position = pose.to_point()
         target = target_point(position, path, self.config.lookahead_distance_m)
-        candidates: list[_Candidate] = []
+        best_rank = None
+        best_command, best_clearance = STOP, 0.0
         linear_samples, angular_samples = self._window(velocity)
         for linear in linear_samples:
             for angular in angular_samples:
@@ -243,19 +258,15 @@ class LocalPlanner:
                 if not safe:
                     continue
                 progress = progress_field.progress_m(position, world[-1].to_point())
-                candidates.append(
-                    _Candidate(
-                        self._score(command, world[-1], target, progress, clearance),
-                        command,
-                        clearance,
-                    )
-                )
-        if not candidates:
+                score = self._score(command, world[-1], target, progress, clearance)
+                rank = (score, clearance, linear, -abs(angular))
+                if best_rank is None or rank > best_rank:
+                    best_rank, best_command, best_clearance = rank, command, clearance
+        if best_rank is None:
             return ControlDecision(STOP, None, False, False)
-        choice = max(candidates, key=lambda item: item.rank)
         return ControlDecision(
-            choice.command,
-            max(0.0, choice.clearance - self.config.robot_radius_m),
+            best_command,
+            max(0.0, best_clearance - self.config.robot_radius_m),
             True,
             not self.cost_map.is_free(position),
         )

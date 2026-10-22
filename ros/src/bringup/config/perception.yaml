@@ -1,0 +1,37 @@
+depth_obstacle_adapter:
+  ros__parameters:
+    depth_topic: /camera/depth/image_raw
+    camera_info_topic: /camera/depth/camera_info
+    base_frame: base_footprint
+    sensor_timeout: 0.4
+    camera_info_timeout: 2.0
+    max_rate: 15.0
+    range_min: 0.25
+    range_max: 4.0
+    obstacle_min_z: 0.05
+    obstacle_max_z: 1.20
+    stride: 4
+    bins: 181
+    min_valid_fraction: 0.60
+    min_samples: 3
+motion_monitor:
+  ros__parameters:
+    sensor_timeout: 0.6
+    margin: 0.03
+    max_linear: 0.15
+    max_angular: 0.30
+    reaction_time: 0.30
+    deceleration: 0.35
+vo_gate:
+  ros__parameters:
+    base_frame: base_footprint
+    recovery_samples: 5
+    timeout: 0.4
+    min_inliers: 30
+    min_ratio: 0.4
+    max_speed: 0.6
+    max_yaw_rate: 1.0
+    max_pose_step: 0.25
+    # Engineering starting value: VO must not advertise excessive confidence.
+    variance_floor: 0.04
+    variance_max: 1.0

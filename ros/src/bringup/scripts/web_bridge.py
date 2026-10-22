@@ -38,8 +38,11 @@ class WebBridge(Node):
         self.declare_parameter('point_stride', 2)
         self.declare_parameter('max_points', 180)
         self.declare_parameter('transform_timeout', 0.05)
+        self.declare_parameter('use_scan', False)
+        self.declare_parameter('scan_topic', '/depth/scan')
         self.declare_parameter('action_name', '/navigate_to_pose')
         self.declare_parameter('map_frame', 'map')
+        self.declare_parameter('base_frame', 'base_footprint')
 
         publish_rate = max(float(self.get_parameter('publish_rate').value), 1.0)
         self.scan_publish_period = 1.0 / publish_rate
@@ -47,7 +50,9 @@ class WebBridge(Node):
         self.max_points = max(int(self.get_parameter('max_points').value), 1)
         self.transform_timeout = max(
             float(self.get_parameter('transform_timeout').value), 0.0)
+        self.use_scan = bool(self.get_parameter('use_scan').value)
         self.map_frame = str(self.get_parameter('map_frame').value)
+        self.base_frame = str(self.get_parameter('base_frame').value)
 
         self.last_scan_publish_time = 0.0
         self.scan_sequence = 0
@@ -78,8 +83,10 @@ class WebBridge(Node):
         self.status_publisher = self.create_publisher(
             String, '/web/nav_status', qos)
 
-        self.create_subscription(
-            LaserScan, '/scan', self.scan_callback, qos_profile_sensor_data)
+        if self.use_scan:
+            self.create_subscription(
+                LaserScan, str(self.get_parameter('scan_topic').value),
+                self.scan_callback, qos_profile_sensor_data)
         self.create_subscription(
             OccupancyGrid, '/map', self.map_callback, map_qos)
         self.create_subscription(
@@ -95,8 +102,13 @@ class WebBridge(Node):
     def publish_robot_pose(self):
         try:
             transform = self.tf_buffer.lookup_transform(
-                self.map_frame, 'base_footprint', Time())
-        except TransformException:
+                self.map_frame, self.base_frame, Time())
+        except TransformException as error:
+            self.get_logger().warning(
+                'Robot pose unavailable: TF %s -> %s is missing (%s)' %
+                (self.map_frame, self.base_frame, error),
+                throttle_duration_sec=5.0,
+            )
             return
 
         pose = PoseStamped()
@@ -120,7 +132,7 @@ class WebBridge(Node):
                 timeout=Duration(seconds=self.transform_timeout))
         except TransformException as error:
             self.dropped_scan_count += 1
-            self.get_logger().warn(
+            self.get_logger().warning(
                 'Dropping scan: no TF at source timestamp (%s), dropped=%d' %
                 (error, self.dropped_scan_count),
                 throttle_duration_sec=5.0,
