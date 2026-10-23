@@ -45,7 +45,9 @@ Server bật `permessage-deflate`; browser tự negotiate extension này.
 
 Nút **Dừng quét map** publish `/web/freeze_map` (`std_msgs/msg/Empty`). Node
 `map_lifecycle` lưu database RTAB-Map rồi gọi dịch vụ chuyển sang localization
-mode; map và cảm biến depth tiếp tục phục vụ Nav.
+mode; map và cảm biến depth tiếp tục phục vụ Nav. Sau đó chính nút này đổi thành
+**Tiếp tục quét map**, publish `/web/resume_map` (`std_msgs/msg/Empty`) để mở
+lại mapping trên map hiện tại. Lần dừng tiếp theo lưu một phiên bản mới.
 
 ### `/web/map`
 

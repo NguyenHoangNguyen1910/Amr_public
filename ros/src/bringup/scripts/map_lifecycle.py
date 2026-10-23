@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Archive a completed RTAB-Map session and keep localizing against it."""
+"""Toggle RTAB-Map mapping/localization and archive each completed map."""
 
 import argparse
 import json
@@ -89,9 +89,12 @@ class MapLifecycle(Node):
         self.create_subscription(OccupancyGrid, "/rtabmap/map", self.map_callback, qos)
         self.create_subscription(Odometry, "/odom", self.odom_callback, 10)
         self.create_subscription(EmptyMessage, "/web/freeze_map", self.freeze_callback, 10)
+        self.create_subscription(EmptyMessage, "/web/resume_map", self.resume_callback, 10)
         self.backup_client = self.create_client(EmptyService, "/rtabmap/rtabmap/backup")
         self.localization_client = self.create_client(
             EmptyService, "/rtabmap/rtabmap/set_mode_localization")
+        self.mapping_client = self.create_client(
+            EmptyService, "/rtabmap/rtabmap/set_mode_mapping")
         self.create_timer(1.0, self.publish_status)
         self.publish_status()
 
@@ -159,8 +162,8 @@ class MapLifecycle(Node):
     def localization_done(self, future):
         try:
             future.result()
-            select_active_map(self.archive_dir, self.archive_name)
             self.mode = "localizing"
+            select_active_map(self.archive_dir, self.archive_name)
             self.busy = False
             self.status_message = "Đã dừng xây dựng map; localization và Nav vẫn hoạt động"
             self.get_logger().info(self.status_message)
@@ -168,6 +171,29 @@ class MapLifecycle(Node):
         except Exception as error:
             # The archive remains available even if the active-map pointer fails.
             self.fail(f"Chuyển sang localization chưa hoàn tất: {error}")
+
+    def resume_callback(self, _request):
+        if self.busy or self.mode != "localizing":
+            return
+        if not self.mapping_client.service_is_ready():
+            self.fail("Dịch vụ tiếp tục quét map chưa sẵn sàng")
+            return
+        self.busy = True
+        self.status_message = "Đang tiếp tục quét trên map hiện tại"
+        self.publish_status()
+        future = self.mapping_client.call_async(EmptyService.Request())
+        future.add_done_callback(self.mapping_done)
+
+    def mapping_done(self, future):
+        try:
+            future.result()
+            self.mode = "mapping"
+            self.busy = False
+            self.status_message = "Đang mở rộng map; bấm Dừng quét map để lưu thay đổi"
+            self.get_logger().info(self.status_message)
+            self.publish_status()
+        except Exception as error:
+            self.fail(f"Tiếp tục quét map thất bại: {error}")
 
 
 def main():

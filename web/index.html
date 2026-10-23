@@ -692,18 +692,24 @@
     }
     function updateFreezeButton() {
       const button = $('freezeMapButton');
+      const scanning = state.mapMode === 'MAPPING';
+      const stopped = state.mapMode === 'LOCALIZING';
+      button.textContent = scanning ? 'Dừng quét map'
+        : stopped ? 'Tiếp tục quét map' : 'Đang xử lý map';
       button.disabled = !realtimeRos.connected || !state.map || state.navigationActive
-        || state.mapMode !== 'MAPPING';
-      button.title = state.mapMode === 'MAPPING'
-        ? 'Lưu map hiện tại và chuyển sang định vị trên map đã lưu'
-        : 'Chỉ dùng khi đang xây dựng map';
+        || (!scanning && !stopped);
+      button.title = scanning ? 'Lưu map hiện tại và tiếp tục định vị'
+        : stopped ? 'Tiếp tục mở rộng map hiện tại' : 'Đang chờ trạng thái map';
     }
-    function freezeMap() {
+    function toggleMapScanning() {
       if ($('freezeMapButton').disabled) return;
+      const scanning = state.mapMode === 'MAPPING';
       state.mapMode = 'BUSY';
-      $('mapModeStatus').textContent = 'Đang lưu map và dừng quét...';
+      $('mapModeStatus').textContent = scanning
+        ? 'Đang lưu map và dừng quét...' : 'Đang tiếp tục quét map...';
       updateFreezeButton();
-      realtimeRos.publish('/web/freeze_map', 'std_msgs/msg/Empty', {});
+      realtimeRos.publish(scanning ? '/web/freeze_map' : '/web/resume_map',
+        'std_msgs/msg/Empty', {});
     }
     function publishGoal() {
       if (!state.goal) return;
@@ -811,7 +817,7 @@
     $('setGoal').onclick = setGoalInteraction;
     $('goButton').onclick = publishGoal;
     $('cancelButton').onclick = cancelNavigation;
-    $('freezeMapButton').onclick = freezeMap;
+    $('freezeMapButton').onclick = toggleMapScanning;
     bulkRos.subscribe('/web/map', 'nav_msgs/msg/OccupancyGrid', msg => {
       state.map = msg;
       updateMapTransform(msg);

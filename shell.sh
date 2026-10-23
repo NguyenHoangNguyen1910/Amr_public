@@ -316,15 +316,19 @@ rtabmap() {
     "$RTABMAP_IMAGE" \
     bash -lc '
       source /opt/ros/humble/setup.bash
+      map_name_args=()
+      if [[ -n "${RTABMAP_MAP_NAME:-}" ]]; then
+        map_name_args+=("map_name:=${RTABMAP_MAP_NAME}")
+      fi
       exec ros2 launch /opt/amr/rtabmap_rgbd.launch.py \
       "rtabmap_args:=${RTABMAP_ARGS}" \
       "database_path:='"$database_path"'" \
       map_archive_dir:=/maps \
       map_mode:=${RTABMAP_MAP_MODE} \
-      map_name:=${RTABMAP_MAP_NAME} \
       enable_vo:=${ENABLE_VO} \
       topic_queue_size:=${RTABMAP_TOPIC_QUEUE_SIZE} \
-      sync_queue_size:=${RTABMAP_SYNC_QUEUE_SIZE}
+      sync_queue_size:=${RTABMAP_SYNC_QUEUE_SIZE} \
+      "${map_name_args[@]}"
     ' >/dev/null
   echo "RTAB-Map is running: $RTABMAP_CONTAINER"
 }

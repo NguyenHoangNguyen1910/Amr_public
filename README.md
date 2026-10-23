@@ -76,8 +76,10 @@ Khi map đã quét đủ và robot đứng yên, bấm **Dừng quét map** trê
 Hệ thống lưu database RTAB-Map vào `rtabmap_data/map-*.db`, chọn nó làm
 `active_map`, rồi chuyển RTAB-Map sang localization mode. RTAB-Map vẫn chạy
 để hiệu chỉnh vị trí `map -> odom`; camera depth và `/depth/scan` vẫn cập nhật
-vật cản mới cho navigation. Nút chỉ báo hoàn tất khi database đã lưu và
-chuyển chế độ thành công.
+vật cản mới cho navigation. Khi hoàn tất, nút đổi thành **Tiếp tục quét map**.
+Bấm nút này để RTAB-Map tiếp tục mở rộng chính map đang dùng; bấm
+**Dừng quét map** lần nữa để lưu một phiên bản mới và quay lại localization.
+Các phiên bản cũ vẫn được giữ trong `rtabmap_data/`.
 
 Ở lần chạy `./shell.sh rtabmap` tiếp theo, `active_map` được sao vào RAM và
 RTAB-Map tự khởi động ở localization mode. Bản trên ổ lưu trữ không bị ghi

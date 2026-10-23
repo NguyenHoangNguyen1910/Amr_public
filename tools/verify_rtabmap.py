@@ -2,6 +2,7 @@
 import json
 import os
 import signal
+import sqlite3
 import subprocess
 import time
 from pathlib import Path
@@ -84,7 +85,7 @@ def main():
                 static.sendTransform(transform)
                 pixels = np.random.default_rng(7).integers(0, 255, (120, 160, 3), dtype=np.uint8)
                 spin(0.5)
-                for index in range(60):
+                def publish_frame(index):
                     stamp = probe.get_clock().now().to_msg()
                     color, distance, info, odom = Image(), Image(), CameraInfo(), Odometry()
                     for message in (color, distance, info):
@@ -113,6 +114,9 @@ def main():
                     rgb.publish(color)
                     depth.publish(distance)
                     spin(0.1)
+
+                for index in range(60):
+                    publish_frame(index)
                 spin(0.5)
                 assert len(synced) > 10, 'shared RGB-D sync did not process frames'
                 assert any(m.info.width > 0 and m.info.height > 0 for m in maps), 'mapper produced no map without VO'
@@ -141,6 +145,47 @@ def main():
                 archived_database = archive_dir/(name+'.db')
                 assert archived_database.stat().st_size > 4096
                 assert parameter('/rtabmap/rtabmap', 'Mem/IncrementalMemory').string_value.lower() == 'false'
+                with sqlite3.connect(archived_database) as database:
+                    first_nodes = database.execute('SELECT count(*) FROM Node').fetchone()[0]
+                resume = probe.create_publisher(Empty, '/web/resume_map', 10)
+                spin(0.2)
+                statuses.clear()
+                resume.publish(Empty())
+                deadline = time.monotonic()+10
+                while time.monotonic() < deadline:
+                    spin(0.1)
+                    if statuses and json.loads(statuses[-1].data)['state'] == 'MAPPING':
+                        break
+                assert statuses and json.loads(statuses[-1].data)['state'] == 'MAPPING', (
+                    'resume mapping failed: '+str([x.data for x in statuses[-3:]]))
+                assert parameter('/rtabmap/rtabmap', 'Mem/IncrementalMemory').string_value.lower() == 'true'
+                for index in range(60, 90):
+                    publish_frame(index)
+                for _ in range(4):
+                    stationary = Odometry()
+                    stationary.header.stamp = probe.get_clock().now().to_msg()
+                    stationary.header.frame_id = 'odom'
+                    stationary.child_frame_id = 'base_footprint'
+                    stationary.pose.pose.orientation.w = 1.0
+                    stationary.pose.pose.position.x = 0.89
+                    wheel.publish(stationary)
+                    spin(0.1)
+                statuses.clear()
+                freeze.publish(Empty())
+                deadline = time.monotonic()+40
+                while time.monotonic() < deadline:
+                    spin(0.1)
+                    if statuses and json.loads(statuses[-1].data)['state'] == 'LOCALIZING':
+                        break
+                assert statuses and json.loads(statuses[-1].data)['state'] == 'LOCALIZING', (
+                    'second map freeze failed: '+str([x.data for x in statuses[-3:]]))
+                second_name = (archive_dir/'active_map').read_text().strip()
+                assert second_name != name, 'second freeze did not publish a new map version'
+                archived_database = archive_dir/(second_name+'.db')
+                with sqlite3.connect(archived_database) as database:
+                    second_nodes = database.execute('SELECT count(*) FROM Node').fetchone()[0]
+                assert second_nodes > first_nodes, (first_nodes, second_nodes)
+                name = second_name
                 process.send_signal(signal.SIGINT)
                 assert process.wait(timeout=15) == 0
                 process = subprocess.Popen([
@@ -156,6 +201,16 @@ def main():
                 rclpy.spin_until_future_complete(probe, future, timeout_sec=10)
                 assert future.result() is not None and future.result().map.info.width > 0, (
                     'saved database did not restore the occupancy map')
+                statuses.clear()
+                resume.publish(Empty())
+                deadline = time.monotonic()+10
+                while time.monotonic() < deadline:
+                    spin(0.1)
+                    if statuses and json.loads(statuses[-1].data)['state'] == 'MAPPING':
+                        break
+                assert statuses and json.loads(statuses[-1].data)['state'] == 'MAPPING', (
+                    'loaded map did not resume mapping: '+str([x.data for x in statuses[-3:]]))
+                assert parameter('/rtabmap/rtabmap', 'Mem/IncrementalMemory').string_value.lower() == 'true'
                 print('Synthetic RGB-D + external odometry produced a map with VO absent')
             else:
                 assert not parameter('/vo/rgbd_odometry', 'publish_tf').bool_value
