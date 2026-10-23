@@ -261,6 +261,7 @@
         <button id="setGoal">Set Goal</button>
         <button id="goButton" class="primary" disabled>GO</button>
         <button id="cancelButton" disabled>Cancel</button>
+        <button id="freezeMapButton" disabled>Dừng quét map</button>
         <span class="spacer"></span>
         <div class="pose-readouts" aria-label="Tọa độ robot và target trong frame map">
           <section class="pose-card" aria-label="Vị trí hiện tại A">
@@ -305,6 +306,7 @@
         </section>
       </div>
       <p id="mapHint" class="map-hint" role="status" aria-live="polite">Bấm Set Goal để chọn điểm B.</p>
+      <p id="mapModeStatus" class="map-hint" role="status" aria-live="polite">Đang chờ trạng thái map.</p>
       <div class="legend">
         <span><i class="robot"></i>Robot</span>
         <span><i class="goal"></i>Goal</span>
@@ -378,7 +380,7 @@
       path: null, goal: null,
       sensorReady: new Set(), manualCommand: null,
       keyboardActive: false, keyboardKeys: new Set(),
-      localized: false, navigationActive: false,
+      localized: false, navigationActive: false, mapMode: 'UNKNOWN',
       mapTransform: null,
       dirty: {map: true, path: true, overlay: true}
     };
@@ -421,6 +423,7 @@
         $('cancelButton').disabled = !state.navigationActive;
       }
       updateGoButton();
+      updateFreezeButton();
     }
     function yawFromQuaternion(q) {
       return Math.atan2(2 * (q.w * q.z + q.x * q.y), 1 - 2 * (q.y * q.y + q.z * q.z));
@@ -687,6 +690,21 @@
       else if (state.navigationActive) button.title = 'Robot đang di chuyển';
       else button.title = 'Bắt đầu điều hướng tới điểm B';
     }
+    function updateFreezeButton() {
+      const button = $('freezeMapButton');
+      button.disabled = !realtimeRos.connected || !state.map || state.navigationActive
+        || state.mapMode !== 'MAPPING';
+      button.title = state.mapMode === 'MAPPING'
+        ? 'Lưu map hiện tại và chuyển sang định vị trên map đã lưu'
+        : 'Chỉ dùng khi đang xây dựng map';
+    }
+    function freezeMap() {
+      if ($('freezeMapButton').disabled) return;
+      state.mapMode = 'BUSY';
+      $('mapModeStatus').textContent = 'Đang lưu map và dừng quét...';
+      updateFreezeButton();
+      realtimeRos.publish('/web/freeze_map', 'std_msgs/msg/Empty', {});
+    }
     function publishGoal() {
       if (!state.goal) return;
       if (!realtimeRos.connected) {
@@ -722,8 +740,8 @@
     }
     function zeroTwist() { return {linear: {x: 0, y: 0, z: 0}, angular: {x: 0, y: 0, z: 0}}; }
     function arrowMotion(x, y) {
-      const linear = -y * .15;
-      return {linear: {x: linear, y: 0, z: 0}, angular: {x: 0, y: 0, z: x * .30}};
+      const linear = -y * .35;
+      return {linear: {x: linear, y: 0, z: 0}, angular: {x: 0, y: 0, z: x * .40}};
     }
     function isArrowKey(key) {
       return key === 'ArrowUp' || key === 'ArrowDown' || key === 'ArrowLeft' || key === 'ArrowRight';
@@ -793,6 +811,7 @@
     $('setGoal').onclick = setGoalInteraction;
     $('goButton').onclick = publishGoal;
     $('cancelButton').onclick = cancelNavigation;
+    $('freezeMapButton').onclick = freezeMap;
     bulkRos.subscribe('/web/map', 'nav_msgs/msg/OccupancyGrid', msg => {
       state.map = msg;
       updateMapTransform(msg);
@@ -800,6 +819,7 @@
       state.dirty.path = true;
       state.dirty.overlay = true;
       markSensor('map');
+      updateFreezeButton();
       scheduleRender();
     }, 200);
     realtimeRos.subscribe('/robot_pose', 'geometry_msgs/msg/PoseStamped', msg => {
@@ -837,8 +857,18 @@
           realtimeRos.publish('/web/control_mode', 'std_msgs/msg/String', {data: 'manual'});
         }
         updateGoButton();
+        updateFreezeButton();
       }
       catch (_) {}
+    }, 0);
+    realtimeRos.subscribe('/web/map_mode', 'std_msgs/msg/String', msg => {
+      try {
+        const data = JSON.parse(msg.data);
+        state.mapMode = data.state;
+        $('mapModeStatus').textContent = data.message
+          + (data.map_name ? ' (' + data.map_name + ')' : '');
+        updateFreezeButton();
+      } catch (_) {}
     }, 0);
     depth.palette = createDepthPalette();
     connectDepth();

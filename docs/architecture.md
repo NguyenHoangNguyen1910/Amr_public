@@ -107,8 +107,8 @@ over all directions is not established by this implementation.
 ## Run and verify
 
 From `amr`, build with `./shell.sh build`; then use the bootstrap/rtabmap/run
-commands in README. VO is off by default. Enable explicitly with
-`ENABLE_VO=true ./shell.sh rtabmap`; disable with `ENABLE_VO=false`.
+commands in README. VO is on by default; disable it with
+`ENABLE_VO=false ./shell.sh rtabmap`.
 Camera/mapper configuration fingerprints cause `shell.sh` to recreate their
 containers on a subsequent explicit start when configuration changes, rather
 than silently keeping stale startup parameters.

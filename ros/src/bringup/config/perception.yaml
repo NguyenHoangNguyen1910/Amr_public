@@ -18,8 +18,8 @@ motion_monitor:
   ros__parameters:
     sensor_timeout: 0.6
     margin: 0.03
-    max_linear: 0.15
-    max_angular: 0.30
+    max_linear: 0.35
+    max_angular: 0.40
     reaction_time: 0.30
     deceleration: 0.35
 vo_gate:

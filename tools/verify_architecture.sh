@@ -42,6 +42,7 @@ for mode in false true; do
     -e ROS_DOMAIN_ID=84 -e ROS_LOCALHOST_ONLY=1 -e VERIFY_VO="$mode" \
     -v "$ROOT/config/rtabmap_rgbd.launch.py:/opt/amr/rtabmap_rgbd.launch.py:ro" \
     -v "$ROOT/ros/src/bringup/scripts/vo_gate.py:/opt/amr/vo_gate.py:ro" \
+    -v "$ROOT/ros/src/bringup/scripts/map_lifecycle.py:/opt/amr/map_lifecycle.py:ro" \
     -v "$ROOT/ros/src/bringup/scripts/amr_perception:/opt/amr/amr_perception:ro" \
     -v "$ROOT/ros/src/bringup/config/perception.yaml:/opt/amr/perception.yaml:ro" \
     -v "$ROOT/tools:/tools:ro" -v "$VERIFY_DIR:/verify" \

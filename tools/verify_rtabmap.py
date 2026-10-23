@@ -4,17 +4,19 @@ import os
 import signal
 import subprocess
 import time
+from pathlib import Path
 
 import numpy as np
 import rclpy
 from geometry_msgs.msg import TransformStamped, TwistWithCovarianceStamped
 from nav_msgs.msg import OccupancyGrid, Odometry
+from nav_msgs.srv import GetMap
 from rclpy.node import Node
 from rclpy.qos import qos_profile_sensor_data
 from rcl_interfaces.srv import GetParameters
 from rtabmap_msgs.msg import OdomInfo, RGBDImage
 from sensor_msgs.msg import CameraInfo, Image
-from std_msgs.msg import String
+from std_msgs.msg import Empty, String
 from tf2_msgs.msg import TFMessage
 from tf2_ros import StaticTransformBroadcaster, TransformBroadcaster
 
@@ -41,10 +43,11 @@ def main():
     with open('/verify/rtabmap-'+label+'.log', 'w') as log:
         process = subprocess.Popen([
             'ros2', 'launch', '/opt/amr/rtabmap_rgbd.launch.py',
-            'enable_vo:='+str(enabled).lower(), 'database_path:=/tmp/verify.db'],
+            'enable_vo:='+str(enabled).lower(), 'database_path:=/tmp/verify.db',
+            'map_archive_dir:=/verify/maps-'+label],
             stdout=log, stderr=subprocess.STDOUT, start_new_session=True)
         try:
-            expected = {'rgbd_sync', 'rtabmap'} | ({'rgbd_odometry', 'vo_gate'} if enabled else set())
+            expected = {'rgbd_sync', 'rtabmap', 'map_lifecycle'} | ({'rgbd_odometry', 'vo_gate'} if enabled else set())
             deadline = time.monotonic()+20
             while time.monotonic() < deadline:
                 spin(0.1)
@@ -113,6 +116,46 @@ def main():
                 spin(0.5)
                 assert len(synced) > 10, 'shared RGB-D sync did not process frames'
                 assert any(m.info.width > 0 and m.info.height > 0 for m in maps), 'mapper produced no map without VO'
+                statuses = []
+                freeze = probe.create_publisher(Empty, '/web/freeze_map', 10)
+                probe.create_subscription(String, '/web/map_mode', statuses.append, 10)
+                spin(0.3)
+                for _ in range(4):
+                    stationary = Odometry()
+                    stationary.header.stamp = probe.get_clock().now().to_msg()
+                    stationary.header.frame_id = 'odom'
+                    stationary.child_frame_id = 'base_footprint'
+                    stationary.pose.pose.orientation.w = 1.0
+                    wheel.publish(stationary)
+                    spin(0.1)
+                freeze.publish(Empty())
+                deadline = time.monotonic()+40
+                while time.monotonic() < deadline:
+                    spin(0.1)
+                    if statuses and json.loads(statuses[-1].data)['state'] == 'LOCALIZING':
+                        break
+                assert statuses and json.loads(statuses[-1].data)['state'] == 'LOCALIZING', (
+                    'map freeze failed: '+str([x.data for x in statuses[-3:]]))
+                archive_dir = Path('/verify/maps-'+label)
+                name = (archive_dir/'active_map').read_text().strip()
+                archived_database = archive_dir/(name+'.db')
+                assert archived_database.stat().st_size > 4096
+                assert parameter('/rtabmap/rtabmap', 'Mem/IncrementalMemory').string_value.lower() == 'false'
+                process.send_signal(signal.SIGINT)
+                assert process.wait(timeout=15) == 0
+                process = subprocess.Popen([
+                    'ros2', 'launch', '/opt/amr/rtabmap_rgbd.launch.py',
+                    'enable_vo:=false', 'database_path:='+str(archived_database),
+                    'map_archive_dir:='+str(archive_dir), 'map_mode:=localizing',
+                    'map_name:='+name, 'rtabmap_args:=--Mem/IncrementalMemory false'],
+                    stdout=log, stderr=subprocess.STDOUT, start_new_session=True)
+                map_client = probe.create_client(GetMap, '/rtabmap/rtabmap/get_map')
+                assert map_client.wait_for_service(timeout_sec=15), 'saved map did not reload'
+                assert parameter('/rtabmap/rtabmap', 'Mem/IncrementalMemory').string_value.lower() == 'false'
+                future = map_client.call_async(GetMap.Request())
+                rclpy.spin_until_future_complete(probe, future, timeout_sec=10)
+                assert future.result() is not None and future.result().map.info.width > 0, (
+                    'saved database did not restore the occupancy map')
                 print('Synthetic RGB-D + external odometry produced a map with VO absent')
             else:
                 assert not parameter('/vo/rgbd_odometry', 'publish_tf').bool_value

@@ -180,8 +180,8 @@ def generate_launch_description():
             name='cmd_vel_arbiter',
             parameters=[{
                 'default_mode': 'manual',
-                'manual_max_linear_x': 0.15,
-                'manual_max_angular_z': 0.30,
+                'manual_max_linear_x': 0.35,
+                'manual_max_angular_z': 0.40,
             }],
             output='screen',
         ),

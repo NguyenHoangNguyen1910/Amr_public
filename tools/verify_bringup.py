@@ -31,11 +31,23 @@ def main():
             assert expected.issubset(set(node.get_node_names())), node.get_node_names()
             client = node.create_client(GetParameters, '/navigation/get_parameters')
             assert client.wait_for_service(timeout_sec=5)
-            future = client.call_async(GetParameters.Request(names=['scan_topic', 'min_linear_velocity_mps']))
+            future = client.call_async(GetParameters.Request(names=[
+                'scan_topic', 'min_linear_velocity_mps',
+                'default_linear_velocity_mps', 'max_linear_velocity_mps',
+                'max_angular_velocity_rps']))
             rclpy.spin_until_future_complete(node, future, timeout_sec=5)
             values = future.result().values
             assert values[0].string_value == '/depth/scan'
-            assert values[1].double_value == -0.22
+            assert values[1].double_value == -0.35
+            assert [value.double_value for value in values[2:]] == [0.35, 0.35, 0.40]
+            arbiter = node.create_client(GetParameters, '/cmd_vel_arbiter/get_parameters')
+            assert arbiter.wait_for_service(timeout_sec=5)
+            future = arbiter.call_async(GetParameters.Request(names=[
+                'min_linear_x', 'max_linear_x', 'max_angular_z',
+                'manual_max_linear_x', 'manual_max_angular_z']))
+            rclpy.spin_until_future_complete(node, future, timeout_sec=5)
+            assert [value.double_value for value in future.result().values] == [
+                -0.35, 0.35, 0.40, 0.35, 0.40]
             publishers = node.get_publishers_info_by_topic('/cmd_vel')
             assert len(publishers) == 1, [p.node_name for p in publishers]
             assert publishers[0].node_name == 'cmd_vel_arbiter'

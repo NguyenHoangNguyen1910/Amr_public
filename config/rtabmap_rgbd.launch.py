@@ -11,6 +11,7 @@ from launch_ros.actions import Node
 def mapping_nodes(context):
     queue = int(LaunchConfiguration('sync_queue_size').perform(context))
     topic_queue = int(LaunchConfiguration('topic_queue_size').perform(context))
+    database_path = LaunchConfiguration('database_path').perform(context)
     return [
         Node(package='rtabmap_sync', executable='rgbd_sync', name='rgbd_sync',
              output='screen', parameters=[{
@@ -31,7 +32,7 @@ def mapping_nodes(context):
                  'approx_sync_max_interval': 0.05, 'odom_sensor_sync': True,
                  'topic_queue_size': topic_queue, 'sync_queue_size': queue,
                  'qos_image': 2, 'qos_odom': 1, 'wait_for_transform': 0.1,
-                 'database_path': LaunchConfiguration('database_path').perform(context),
+                 'database_path': database_path,
                  'Rtabmap/DetectionRate': '1.0', 'Grid/Sensor': '1', 'Grid/RangeMax': '4.0',
              }], remappings=[('rgbd_image', '/camera/rgbd_image'), ('odom', '/odom'),
                              ('map', '/rtabmap/map')],
@@ -51,6 +52,13 @@ def mapping_nodes(context):
         ExecuteProcess(cmd=['python3', '/opt/amr/vo_gate.py', '--ros-args',
                             '--params-file', '/opt/amr/perception.yaml'],
                        output='screen', condition=IfCondition(LaunchConfiguration('enable_vo'))),
+        ExecuteProcess(cmd=[
+            'python3', '/opt/amr/map_lifecycle.py',
+            '--database', database_path,
+            '--archive-dir', LaunchConfiguration('map_archive_dir').perform(context),
+            '--mode', LaunchConfiguration('map_mode').perform(context),
+            '--map-name', LaunchConfiguration('map_name').perform(context),
+        ], output='screen'),
     ]
 
 
@@ -59,6 +67,9 @@ def generate_launch_description():
         DeclareLaunchArgument('enable_vo', default_value='false'),
         DeclareLaunchArgument('rtabmap_args', default_value=''),
         DeclareLaunchArgument('database_path', default_value='/root/.ros/rtabmap.db'),
+        DeclareLaunchArgument('map_archive_dir', default_value='/maps'),
+        DeclareLaunchArgument('map_mode', default_value='mapping'),
+        DeclareLaunchArgument('map_name', default_value=''),
         DeclareLaunchArgument('topic_queue_size', default_value='3'),
         DeclareLaunchArgument('sync_queue_size', default_value='3'),
         OpaqueFunction(function=mapping_nodes),

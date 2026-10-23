@@ -33,7 +33,7 @@
     ir_qos: default
     ir_camera_info_qos: default
     publish_tf: true
-    tf_publish_rate: 10.0
+    tf_publish_rate: 0.0
     ir_info_url: ''
     color_info_url: ''
     color_depth_synchronization: true

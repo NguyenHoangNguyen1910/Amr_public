@@ -19,8 +19,8 @@ class NavigationSafetyTest(unittest.TestCase):
         node = NavigationNode()
         try:
             command = node.publish_velocity(-100.0, -100.0)
-            self.assertEqual(command["linear"], -0.22)
-            self.assertEqual(command["angular"], -0.55)
+            self.assertEqual(command["linear"], -0.35)
+            self.assertEqual(command["angular"], -0.40)
         finally:
             node.destroy_node()
 

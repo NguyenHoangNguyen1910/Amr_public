@@ -41,6 +41,11 @@ Server bật `permessage-deflate`; browser tự negotiate extension này.
 | `/web/scan_points` | `bringup/msg/ScanPoints` | 200 ms | Nhận depth scan packed trên realtime socket và vẽ màu cam |
 | `/plan` | `nav_msgs/msg/Path` | 250 ms | Nhận đường đi navigation và vẽ màu xanh tím |
 | `/web/nav_status` | `std_msgs/msg/String` | 0 | Nhận trạng thái điều hướng tới goal |
+| `/web/map_mode` | `std_msgs/msg/String` | 0 | Trạng thái lưu map và chế độ mapping/localization |
+
+Nút **Dừng quét map** publish `/web/freeze_map` (`std_msgs/msg/Empty`). Node
+`map_lifecycle` lưu database RTAB-Map rồi gọi dịch vụ chuyển sang localization
+mode; map và cảm biến depth tiếp tục phục vụ Nav.
 
 ### `/web/map`
 
@@ -236,8 +241,8 @@ Publish message rỗng:
 
 ```json
 {
-  "linear": {"x": 0.30, "y": 0, "z": 0},
-  "angular": {"x": 0, "y": 0, "z": 0.55}
+  "linear": {"x": 0.35, "y": 0, "z": 0},
+  "angular": {"x": 0, "y": 0, "z": 0.40}
 }
 ```
 
@@ -260,8 +265,8 @@ Khi nhả phím, mất focus cửa sổ hoặc chuyển sang navigation, fronten
 ```
 
 Node `ros/src/bringup/scripts/cmd_vel_arbiter.py` chọn duy nhất nguồn manual
-hoặc navigation, giới hạn `-0.22 <= linear.x <= 0.30 m/s` và
-`|angular.z| <= 0.55 rad/s`. Lệnh manual hết hạn sau `350 ms`; vì vậy xe tự
+hoặc navigation, giới hạn `-0.35 <= linear.x <= 0.35 m/s` và
+`|angular.z| <= 0.40 rad/s`. Lệnh manual hết hạn sau `350 ms`; vì vậy xe tự
 dừng nếu trình duyệt ngừng gửi lệnh. Arbiter xuất lệnh an toàn cuối cùng lên
 `/cmd_vel` ở `20 Hz`.
 

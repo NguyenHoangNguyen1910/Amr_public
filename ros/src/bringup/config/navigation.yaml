@@ -35,10 +35,10 @@ navigation:
     # Global path và DWA local planner.
     waypoint_spacing_m: 0.25               # Khoảng cách resample waypoint của path.
     lookahead_distance_m: 0.45             # Điểm path local planner nhắm tới phía trước.
-    min_linear_velocity_mps: -0.22         # No new direction interlock; monitor reports unseen rear.
-    default_linear_velocity_mps: 0.12      # Starting speed pending measured stopping tests.
-    max_linear_velocity_mps: 0.15
-    max_angular_velocity_rps: 0.30
+    min_linear_velocity_mps: -0.35         # Rear remains unobserved; motion monitor reports this.
+    default_linear_velocity_mps: 0.35
+    max_linear_velocity_mps: 0.35
+    max_angular_velocity_rps: 0.40
     linear_acceleration_mps2: 0.50         # Gia tốc linear dùng để tạo dynamic window.
     angular_acceleration_rps2: 1.20        # Gia tốc angular dùng để tạo dynamic window.
     control_hz: 5.0                        # Tần suất planner/controller xuất command.

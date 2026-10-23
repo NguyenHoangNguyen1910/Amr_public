@@ -19,10 +19,12 @@ RTABMAP_LAUNCH_FILE="${RTABMAP_LAUNCH_FILE:-$ROOT/config/rtabmap_rgbd.launch.py}
 RTABMAP_DATABASE_NAME="${RTABMAP_DATABASE_NAME:-amr-$(date +%Y%m%d-%H%M%S).db}"
 RTABMAP_PERSIST="${RTABMAP_PERSIST:-false}"
 RTABMAP_SESSION_DB="${RTABMAP_SESSION_DB:-amr-rtabmap-session.db}"
-RTABMAP_ARGS="${RTABMAP_ARGS:---Rtabmap/DetectionRate 1.0 --Mem/IncrementalMemory true --Grid/Sensor 1 --Grid/RangeMax 4.0}"
+RTABMAP_MAP_NAME="${RTABMAP_MAP_NAME:-}"
+RTABMAP_NEW_MAP="${RTABMAP_NEW_MAP:-false}"
+RTABMAP_ARGS="${RTABMAP_ARGS:---Rtabmap/DetectionRate 1.0 --Grid/Sensor 1 --Grid/RangeMax 4.0}"
 RTABMAP_TOPIC_QUEUE_SIZE="${RTABMAP_TOPIC_QUEUE_SIZE:-3}"
 RTABMAP_SYNC_QUEUE_SIZE="${RTABMAP_SYNC_QUEUE_SIZE:-3}"
-ENABLE_VO="${ENABLE_VO:-false}"
+ENABLE_VO="${ENABLE_VO:-true}"
 USE_NAVIGATION="${USE_NAVIGATION:-true}"
 AGENT_IMAGE="${AGENT_IMAGE:-microros/micro-ros-agent:humble}"
 AGENT_CONTAINER="${AGENT_CONTAINER:-yahboom-micro-ros-agent}"
@@ -136,10 +138,10 @@ ensure_micro_ros_agent() {
 build() {
   docker_ok; ensure_image; test -f "$WS/src/robot_localization/package.xml"
   echo "Building ROS workspace: $WS"
-  docker run --rm --cpus=1 --memory=2304m --memory-swap=2304m --pids-limit=256 -v "$WS:/workspace" "$ROS_IMAGE" bash -lc '
+  docker run --rm --cpus=1 --memory=3g --memory-swap=4g --pids-limit=256 -v "$WS:/workspace" "$ROS_IMAGE" bash -lc '
     set -Eeo pipefail; source /opt/ros/humble/setup.bash; set -u; cd /workspace
-    export CMAKE_BUILD_PARALLEL_LEVEL=1 MAKEFLAGS=-j1; ulimit -v 2400000
-    nice -n 15 ionice -c 3 colcon --log-base log build --base-paths src --build-base build --install-base install --executor sequential --parallel-workers 1 --packages-select robot_localization bringup --event-handlers console_cohesion+ --cmake-args -DBUILD_TESTING=OFF -DCMAKE_BUILD_TYPE=Release "-DCMAKE_CXX_FLAGS_RELEASE=-O0 -DNDEBUG"'
+    export CMAKE_BUILD_PARALLEL_LEVEL=1 MAKEFLAGS=-j1; ulimit -v 3200000
+    nice -n 15 ionice -c 3 colcon --log-base log build --base-paths src --build-base build --install-base install --executor sequential --parallel-workers 1 --packages-select robot_localization bringup --event-handlers console_cohesion+ --cmake-args -DBUILD_TESTING=OFF -DCMAKE_BUILD_TYPE=Release "-DCMAKE_CXX_FLAGS_RELEASE=-O2 -DNDEBUG"'
   docker run --rm -v "$WS:/workspace" "$ROS_IMAGE" rm -f /workspace/install/bringup/share/bringup/config/navigation.yaml
   for f in \
     "$WS/install/robot_localization/lib/robot_localization/ekf_node" \
@@ -206,6 +208,27 @@ rtabmap() {
     exit 1
   }
   docker image inspect "$RTABMAP_IMAGE" >/dev/null 2>&1 || docker pull "$RTABMAP_IMAGE"
+  mkdir -p "$RTABMAP_DATA_DIR"
+  case "${RTABMAP_NEW_MAP,,}" in
+    true|1|yes) RTABMAP_MAP_NAME= ;;
+    false|0|no|'')
+      if [[ -z "$RTABMAP_MAP_NAME" && -s "$RTABMAP_DATA_DIR/active_map" ]]; then
+        read -r RTABMAP_MAP_NAME < "$RTABMAP_DATA_DIR/active_map"
+      fi ;;
+    *) echo "Error: RTABMAP_NEW_MAP must be true or false." >&2; return 1 ;;
+  esac
+  local map_mode=mapping
+  if [[ -n "$RTABMAP_MAP_NAME" ]]; then
+    [[ "$RTABMAP_MAP_NAME" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]] || {
+      echo "Error: invalid RTABMAP_MAP_NAME." >&2; return 1;
+    }
+    [[ -s "$RTABMAP_DATA_DIR/$RTABMAP_MAP_NAME.db" ]] || {
+      echo "Error: saved map does not exist: $RTABMAP_MAP_NAME" >&2; return 1;
+    }
+    python3 -c 'import sqlite3,sys; c=sqlite3.connect("file:"+sys.argv[1]+"?mode=ro",uri=True); assert c.execute("PRAGMA quick_check").fetchone()==("ok",), "saved map database is corrupt"; c.close()' \
+      "$RTABMAP_DATA_DIR/$RTABMAP_MAP_NAME.db" || return 1
+    map_mode=localizing
+  fi
   local persist_mode=false
   case "${RTABMAP_PERSIST,,}" in
     true|1|yes) persist_mode=true ;;
@@ -219,18 +242,25 @@ rtabmap() {
   local database_path
   local stack_hash
   stack_hash="$(sha256sum "$RTABMAP_LAUNCH_FILE" \
+    "$ROOT/ros/src/bringup/scripts/map_lifecycle.py" \
     "$ROOT/ros/src/bringup/config/perception.yaml" \
     "$ROOT/ros/src/bringup/scripts/vo_gate.py" \
     "$ROOT/ros/src/bringup/scripts/amr_perception/core.py" | sha256sum | cut -d ' ' -f 1)"
   local rtabmap_args="$RTABMAP_ARGS"
   local -a rtabmap_mounts
   if [[ "$persist_mode" == true ]]; then
-    mkdir -p "$RTABMAP_DATA_DIR"
+    [[ "$map_mode" == mapping ]] || {
+      echo "Error: saved maps run from RAM; set RTABMAP_PERSIST=false." >&2; return 1;
+    }
     database_path="/root/.ros/$RTABMAP_DATABASE_NAME"
     rtabmap_mounts=(-v "$RTABMAP_DATA_DIR:/root/.ros")
   else
     database_path="/rtabmap_ram/$RTABMAP_SESSION_DB"
-    rtabmap_args="$rtabmap_args --delete_db_on_start"
+    if [[ "$map_mode" == mapping ]]; then
+      rtabmap_args="$rtabmap_args --delete_db_on_start"
+    else
+      rtabmap_args="$rtabmap_args --Mem/IncrementalMemory false"
+    fi
     rtabmap_mounts=(-v "/dev/shm:/rtabmap_ram")
   fi
 
@@ -258,6 +288,10 @@ rtabmap() {
     echo "Removing previous RTAB-Map container: $RTABMAP_CONTAINER"
     docker rm "$RTABMAP_CONTAINER" >/dev/null
   fi
+  if [[ "$map_mode" == localizing ]]; then
+    cp -- "$RTABMAP_DATA_DIR/$RTABMAP_MAP_NAME.db" "/dev/shm/$RTABMAP_SESSION_DB.tmp"
+    mv -f -- "/dev/shm/$RTABMAP_SESSION_DB.tmp" "/dev/shm/$RTABMAP_SESSION_DB"
+  fi
   docker run -d --name "$RTABMAP_CONTAINER" --restart on-failure:3 \
     --label "amr.rtabmap-config=$stack_hash" \
     --stop-signal SIGINT \
@@ -266,12 +300,16 @@ rtabmap() {
     --env=RMW_IMPLEMENTATION=rmw_fastrtps_cpp \
     --env="RTABMAP_PERSIST=$persist_mode" \
     --env="ENABLE_VO=$ENABLE_VO" \
+    --env="RTABMAP_MAP_MODE=$map_mode" \
+    --env="RTABMAP_MAP_NAME=$RTABMAP_MAP_NAME" \
     --env="RTABMAP_DATABASE_NAME=$RTABMAP_DATABASE_NAME" \
     --env="RTABMAP_ARGS=$rtabmap_args" \
     --env="RTABMAP_TOPIC_QUEUE_SIZE=$RTABMAP_TOPIC_QUEUE_SIZE" \
     --env="RTABMAP_SYNC_QUEUE_SIZE=$RTABMAP_SYNC_QUEUE_SIZE" \
     "${rtabmap_mounts[@]}" \
+    -v "$RTABMAP_DATA_DIR:/maps" \
     -v "$RTABMAP_LAUNCH_FILE:/opt/amr/rtabmap_rgbd.launch.py:ro" \
+    -v "$ROOT/ros/src/bringup/scripts/map_lifecycle.py:/opt/amr/map_lifecycle.py:ro" \
     -v "$ROOT/ros/src/bringup/scripts/vo_gate.py:/opt/amr/vo_gate.py:ro" \
     -v "$ROOT/ros/src/bringup/scripts/amr_perception:/opt/amr/amr_perception:ro" \
     -v "$ROOT/ros/src/bringup/config/perception.yaml:/opt/amr/perception.yaml:ro" \
@@ -281,6 +319,9 @@ rtabmap() {
       exec ros2 launch /opt/amr/rtabmap_rgbd.launch.py \
       "rtabmap_args:=${RTABMAP_ARGS}" \
       "database_path:='"$database_path"'" \
+      map_archive_dir:=/maps \
+      map_mode:=${RTABMAP_MAP_MODE} \
+      map_name:=${RTABMAP_MAP_NAME} \
       enable_vo:=${ENABLE_VO} \
       topic_queue_size:=${RTABMAP_TOPIC_QUEUE_SIZE} \
       sync_queue_size:=${RTABMAP_SYNC_QUEUE_SIZE}

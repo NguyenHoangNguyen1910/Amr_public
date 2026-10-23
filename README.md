@@ -3,8 +3,8 @@
 ROS 2 AMR stack for Raspberry Pi 5, using the ARM64 Yahboom image and an
 Astra depth camera.
 
-Kiến trúc hiện tại lấy encoder + IMU làm odometry chính. RGB-D VO là tùy chọn,
-tắt mặc định và chỉ bổ sung vận tốc tịnh tiến sau gate. Xem
+Kiến trúc hiện tại lấy encoder + IMU làm odometry chính. RGB-D VO bật mặc định,
+chỉ bổ sung vận tốc tịnh tiến sau gate. Xem
 [kiến trúc và cấu hình](docs/architecture.md).
 
 Kiểm thử không kết nối phần cứng robot:
@@ -41,10 +41,10 @@ Lệnh `run` mặc định dùng map `/rtabmap/map`, tắt SLAM Toolbox và cho 
 tắt IR và point cloud; mapper xử lý khoảng 1 Hz, queue 3. Depth preview giảm
 xuống 5 Hz. Những mức này là cấu hình khởi đầu, chưa phải cam kết độ trễ thực tế.
 
-VO tùy chọn chạy tối đa 5 Hz, không phát TF và không gửi pose/yaw vào EKF:
+VO chạy tối đa 5 Hz, không phát TF và không gửi pose/yaw vào EKF. Có thể tắt bằng:
 
 ```bash
-ENABLE_VO=true ./shell.sh rtabmap
+ENABLE_VO=false ./shell.sh rtabmap
 ```
 
 Các số đo camera/thân robot trong `ros/src/bringup/config/geometry.yaml` được
@@ -70,17 +70,44 @@ Lấy IP robot bằng:
 hostname -I
 ```
 
+## Chốt map để tiếp tục định vị và điều hướng
+
+Khi map đã quét đủ và robot đứng yên, bấm **Dừng quét map** trên Web UI.
+Hệ thống lưu database RTAB-Map vào `rtabmap_data/map-*.db`, chọn nó làm
+`active_map`, rồi chuyển RTAB-Map sang localization mode. RTAB-Map vẫn chạy
+để hiệu chỉnh vị trí `map -> odom`; camera depth và `/depth/scan` vẫn cập nhật
+vật cản mới cho navigation. Nút chỉ báo hoàn tất khi database đã lưu và
+chuyển chế độ thành công.
+
+Ở lần chạy `./shell.sh rtabmap` tiếp theo, `active_map` được sao vào RAM và
+RTAB-Map tự khởi động ở localization mode. Bản trên ổ lưu trữ không bị ghi
+trong lúc định vị. Muốn quét một map mới, chạy:
+
+```bash
+RTABMAP_NEW_MAP=true ./shell.sh rtabmap
+```
+
+Có thể chọn một bản map đã lưu khác bằng:
+
+```bash
+RTABMAP_MAP_NAME=<tên-map> ./shell.sh rtabmap
+```
+
+Chuyển sang phiên RTAB-Map mới sẽ ngắt map/TF trong lúc
+khởi động; hãy dừng Nav trước. Map trong RAM mất khi tắt nguồn, còn bản
+`rtabmap_data/map-*.db` vẫn được giữ để nạp lại.
+
 Map 2D được publish ở `/rtabmap/map`. Cần đo độ trễ và sai số thực tế sau khi
 hiệu chỉnh camera và kiểm chứng odometry; depth preview cập nhật riêng.
 
-Mặc định RTAB-Map chạy theo phiên: database nằm trên `/dev/shm` và bị xóa
-khi phiên mới bắt đầu, nên không ghi database xuống thẻ nhớ. Chế độ này vẫn
-giữ pose graph/map trong suốt thời gian robot đang chạy.
+Trước khi chốt map, RTAB-Map tạo database phiên trong `/dev/shm`; một phiên
+mapping mới sẽ xóa database phiên cũ. Sau khi chốt, bản lưu trên ổ được nạp
+lại vào `/dev/shm` để localization ở các phiên sau.
 
 Nếu cần lưu database để phân tích hoặc tiếp tục phiên sau, bật:
 
 ```bash
-RTABMAP_PERSIST=true ./shell.sh rtabmap
+RTABMAP_NEW_MAP=true RTABMAP_PERSIST=true ./shell.sh rtabmap
 ```
 
 Chế độ persistent lưu trong thư mục `rtabmap_data/`, theo tên

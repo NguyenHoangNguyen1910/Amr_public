@@ -194,8 +194,8 @@ class MotionConfig:
     rear: float = 0.0
     half_width: float = 0.0
     margin: float = 0.03
-    max_linear: float = 0.15
-    max_angular: float = 0.30
+    max_linear: float = 0.35
+    max_angular: float = 0.40
     reaction_time: float = 0.30
     deceleration: float = 0.35
     calibrated: bool = False

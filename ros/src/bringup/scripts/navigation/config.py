@@ -27,10 +27,10 @@ class NavigationConfig:
     terminal_yaw_gain: float = 0.90
     waypoint_spacing_m: float = 0.25
     lookahead_distance_m: float = 0.45
-    min_linear_velocity_mps: float = -0.22
-    default_linear_velocity_mps: float = 0.30
-    max_linear_velocity_mps: float = 0.30
-    max_angular_velocity_rps: float = 0.55
+    min_linear_velocity_mps: float = -0.35
+    default_linear_velocity_mps: float = 0.35
+    max_linear_velocity_mps: float = 0.35
+    max_angular_velocity_rps: float = 0.40
     linear_acceleration_mps2: float = 0.50
     angular_acceleration_rps2: float = 1.20
     control_hz: float = 5.0
